@@ -1,0 +1,5 @@
+customtkinter==5.1.2
+Requests==2.28.2
+requests_ntlm==1.2.0
+selectolax==0.3.12
+~equests==2.28.2
