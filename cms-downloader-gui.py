@@ -48,6 +48,11 @@ def prev_page():
         page_index -= 1
         for page in pages:
             page.pack_forget()
+        if page_index == 0:
+            with open("cms_downloader.config", "w") as file:
+                file.write("username=")
+                file.write("\npassword=")
+                file.close()
         pages[page_index].pack(pady=20, padx=60, fill="both", expand=True)
 
 
@@ -56,7 +61,7 @@ def update_courses(username, password):
     type_select.configure(values=all_courses)
     type_select.set(all_courses[0])
     next_button.pack(pady=12, padx=10)
-
+    logout_button.pack(pady=12, padx=10)
 
 def render_checkboxes():
     [username, password] = getCredentials()
@@ -139,6 +144,7 @@ type_select = customtkinter.CTkOptionMenu(courses_frame, values=all_types)
 type_select.pack(pady=12, padx=10)
 
 next_button = customtkinter.CTkButton(master=courses_frame, text="Next", command= lambda: next_page(type_select.get()))
+logout_button = customtkinter.CTkButton(master=courses_frame, text="Log Out", command= prev_page)
 
 
 # Download Page
