@@ -105,6 +105,7 @@ def download_content(username, password, types):
             
             if title not in all_types:
                 all_types.append(title)
+            
             if (title in types):
                 course_name = html.css_first("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").text()
                 course_name = course_name[course_name.find("|)") + 3: course_name.find(" (")]
@@ -112,7 +113,8 @@ def download_content(username, password, types):
                 link = card.css_first("a").attributes.get('href')
                 file_format = link.split(".")[1]
                 print(DOMAIN + link)
-                download_resp = requests.get(DOMAIN + link, auth=HttpNtlmAuth(username, password))
+                download_resp = requests.get(DOMAIN + link, auth=HttpNtlmAuth(username+"@student.guc.edu.eg", password))
+                print("\nDOWNLOAD STATUS: " + str(download_resp.status_code) + "\n")
                 try: 
                     os.mkdir(course_name) 
                 except OSError as error: 
