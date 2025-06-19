@@ -47,7 +47,9 @@ A user-friendly tool to download content from the GUC CMS, featuring a graphical
 
 Before running the GUI (`cms-downloader-gui.py`), you **must** run the setup script to download and configure `yt-dlp` and `ffmpeg`:
 
-1. **Run the setup script**:
+1. **Run the setup script as an administrator in PowerShell**:
+   - Right-click on PowerShell and select **Run as administrator**.
+   - Navigate to the project directory, then run:
    ```
    python setup_ytdlp_ffmpeg.py
    ```
