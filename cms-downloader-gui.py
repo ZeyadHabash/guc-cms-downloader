@@ -1,174 +1,1123 @@
-import customtkinter
+import customtkinter as ctk
 import requests
 from requests_ntlm import HttpNtlmAuth
 from selectolax.parser import HTMLParser
-from main import download_content, get_types, login, get_courses, update_course_url
+from main import download_content, get_types, login, get_courses, update_course_url, get_course_info_from_formatted_name
+from main import get_total_files
+import threading
+import time
+from datetime import datetime
+import math
+import os
+from tkinter import filedialog
+from dotenv import load_dotenv, set_key
 
-customtkinter.set_appearance_mode("System")
-customtkinter.set_default_color_theme("dark-blue")
+# Configure appearance
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
-input_username = ""
-input_password = ""
-all_types = ["--"]
-page_index = 0
-all_checkboxes = []
-
-root = customtkinter.CTk()
-root.geometry("600x600")
-root.title("GUC CMS Downloader")
-
-
-def start_download():
-    selected_types = get_selected()
-    [username, password] = getCredentials()
-    download_content(username, password, selected_types)
-
-
-def getCredentials():
-    with open("cms_downloader.config", "r") as file:
-            return [file.readline().split("=")[1].strip(), file.readline().split("=")[1].strip()]
-
-
-def next_page(selected_course):
-    [username, password] = getCredentials()
-    global page_index
-    if page_index < len(pages) - 1:
-        page_index += 1
-        for page in pages:
-            page.pack_forget()
-        if page_index == 2:
-            update_course_url(username, password, selected_course)
-            render_checkboxes()
-        pages[page_index].pack(pady=20, padx=60, fill="both", expand=True)
+class LoadingSpinner(ctk.CTkFrame):
+    """Custom animated loading spinner widget"""
+    def __init__(self, master, size=60, color="#4CAF50", **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
         
-
-def prev_page():
-    global page_index
-    if page_index > 0:
-        page_index -= 1
-        for page in pages:
-            page.pack_forget()
-        if page_index == 0:
-            with open("cms_downloader.config", "w") as file:
-                file.write("username=")
-                file.write("\npassword=")
-                file.close()
-        pages[page_index].pack(pady=20, padx=60, fill="both", expand=True)
-
-
-def update_courses(username, password):
-    all_courses = get_courses(username, password)
-    type_select.configure(values=all_courses)
-    type_select.set(all_courses[0])
-    next_button.pack(pady=12, padx=10)
-    logout_button.pack(pady=12, padx=10)
-
-def render_checkboxes():
-    [username, password] = getCredentials()
-    get_types_output = get_types(username, password)
-    all_types = get_types_output.get('types')
-    course_name = get_types_output.get('course_name')
-
-    course_label.configure(text=course_name, font=('Outfit', 25))
-    course_label.pack(pady=12, padx=10)
-
-    download_button.pack_forget()
-    back_button.pack_forget()
-
-    for box in all_checkboxes:
-        box.pack_forget()
-
-    for type in all_types:
-        checkboxes[type] = customtkinter.CTkCheckBox(download_frame, text=type)
-        checkboxes[type].pack(pady=12, padx=10)
-        all_checkboxes.append(checkboxes[type])
+        self.size = size
+        self.color = color
+        self.angle = 0
+        self.is_animating = False
+        
+        # Create canvas for the spinner
+        self.canvas = ctk.CTkCanvas(
+            self, 
+            width=size, 
+            height=size, 
+            bg="#2b2b2b",  # Dark background that matches dark theme
+            highlightthickness=0
+        )
+        self.canvas.pack(expand=True)
+        
+        # Draw the spinner
+        self.draw_spinner()
     
-    download_button.pack(pady=12, padx=10)
-    back_button.pack(pady=12, padx=10)
+    def draw_spinner(self):
+        """Draw the spinner on the canvas"""
+        self.canvas.delete("all")
+        
+        center_x = self.size // 2
+        center_y = self.size // 2
+        radius = (self.size // 2) - 5
+        
+        # Draw 8 dots around a circle
+        for i in range(8):
+            angle = self.angle + (i * 45)
+            x = center_x + radius * math.cos(math.radians(angle))
+            y = center_y + radius * math.sin(math.radians(angle))
+            
+            # Calculate opacity based on position (fade effect)
+            opacity = 1.0 - (i * 0.1)
+            opacity = max(0.2, opacity)  # Minimum opacity
+            
+            # Create color with opacity
+            color_hex = self.color.lstrip('#')
+            r = int(color_hex[0:2], 16)
+            g = int(color_hex[2:4], 16)
+            b = int(color_hex[4:6], 16)
+            
+            # Apply opacity
+            r = int(r * opacity)
+            g = int(g * opacity)
+            b = int(b * opacity)
+            
+            dot_color = f'#{r:02x}{g:02x}{b:02x}'
+            
+            # Draw dot
+            dot_size = 4 if i == 0 else 3  # First dot is slightly larger
+            self.canvas.create_oval(
+                x - dot_size, y - dot_size,
+                x + dot_size, y + dot_size,
+                fill=dot_color, outline=""
+            )
+    
+    def start_animation(self):
+        """Start the spinning animation"""
+        self.is_animating = True
+        self.animate()
+    
+    def stop_animation(self):
+        """Stop the spinning animation"""
+        self.is_animating = False
+    
+    def animate(self):
+        """Animate the spinner"""
+        if self.is_animating:
+            self.angle = (self.angle + 10) % 360
+            self.draw_spinner()
+            self.after(50, self.animate)  # Update every 50ms for smooth animation
 
+class ModernCMSDownloader:
+    def __init__(self):
+        self.root = ctk.CTk()
+        self.root.geometry("900x1000")
+        self.root.title("GUC CMS Downloader")
+        self.root.resizable(True, True)
+        self.root.minsize(800, 600)  # Set minimum window size
+        
+        # Center the window
+        self.center_window()
+        
+        # Ensure .env exists and load it
+        self.ensure_env_file()
+        load_dotenv()
+        
+        # Variables
+        self.input_username = ""
+        self.input_password = ""
+        self.all_types = ["--"]
+        self.page_index = 0
+        self.all_checkboxes = []
+        self.checkboxes = {}
+        self.pages = []
+        self.current_download_thread = None
+        self.is_downloading = False
+        self.output_folder = None
+        self.load_last_output_folder()
+        
+        # Create pages
+        self.create_login_page()
+        self.create_courses_page()
+        self.create_download_page()
+        self.create_loading_page()
+        
+        # Initialize pages list
+        self.pages = [self.login_frame, self.courses_frame, self.download_frame, self.loading_frame]
+        
+        # Check for saved credentials
+        self.check_saved_credentials()
+        
+        # Start the app
+        self.root.mainloop()
+    
+    def center_window(self):
+        """Center the window on screen"""
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f'{width}x{height}+{x}+{y}')
+    
+    def create_login_page(self):
+        """Create the login page with modern design"""
+        self.login_frame = ctk.CTkFrame(master=self.root, fg_color="transparent")
+        
+        # Main container (now scrollable)
+        main_container = ctk.CTkScrollableFrame(master=self.login_frame, corner_radius=20)
+        main_container.pack(pady=40, padx=40, fill="both", expand=True)
+        
+        # Configure grid weights for responsiveness
+        main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(1, weight=1)  # Form container should expand
+        
+        # Header
+        header_frame = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        header_frame.pack(pady=(40, 20), padx=40, fill="x")
+        
+        # Logo/Icon placeholder
+        logo_label = ctk.CTkLabel(
+            master=header_frame, 
+            text="📚", 
+            font=ctk.CTkFont(size=48)
+        )
+        logo_label.pack(pady=(0, 10))
+        
+        title_label = ctk.CTkLabel(
+            master=header_frame, 
+            text="GUC CMS Downloader",
+            font=ctk.CTkFont(size=28, weight="bold")
+        )
+        title_label.pack()
+        
+        subtitle_label = ctk.CTkLabel(
+            master=header_frame, 
+            text="Download your course materials easily",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        subtitle_label.pack(pady=(5, 0))
+        
+        # Form container
+        form_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        form_container.pack(pady=20, padx=40, fill="both", expand=True)
+        
+        # Configure grid weights for form responsiveness
+        form_container.grid_columnconfigure(0, weight=1)
+        
+        # Username field
+        username_label = ctk.CTkLabel(
+            master=form_container,
+            text="Username",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        username_label.pack(pady=(0, 5), padx=5, anchor="w")
+        
+        self.username_entry = ctk.CTkEntry(
+            master=form_container,
+            placeholder_text="Enter your GUC username",
+            height=45,
+            font=ctk.CTkFont(size=14)
+        )
+        self.username_entry.pack(pady=(0, 20), padx=5, fill="x")
+        
+        # Password field
+        password_label = ctk.CTkLabel(
+            master=form_container,
+            text="Password",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        password_label.pack(pady=(0, 5), padx=5, anchor="w")
+        
+        self.password_entry = ctk.CTkEntry(
+            master=form_container,
+            placeholder_text="Enter your password",
+            show="•",
+            height=45,
+            font=ctk.CTkFont(size=14)
+        )
+        self.password_entry.pack(pady=(0, 30), padx=5, fill="x")
+        
+        # Error label
+        self.error_label = ctk.CTkLabel(
+            master=form_container,
+            text="Invalid credentials. Please try again.",
+            font=ctk.CTkFont(size=12),
+            text_color="#ff6b6b"
+        )
+        
+        # Login button
+        self.login_button = ctk.CTkButton(
+            master=form_container,
+            text="Sign In",
+            command=self.login_gui,
+            height=50,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            fg_color="#4CAF50",
+            hover_color="#45a049"
+        )
+        self.login_button.pack(pady=(0, 20), padx=5, fill="x")
+        
+        # Footer
+        footer_label = ctk.CTkLabel(
+            master=main_container,
+            text="© 2025 GUC CMS Downloader",
+            font=ctk.CTkFont(size=10),
+            text_color="gray"
+        )
+        footer_label.pack(side="bottom", pady=20)
+    
+    def create_courses_page(self):
+        """Create the course selection page"""
+        self.courses_frame = ctk.CTkFrame(master=self.root, fg_color="transparent")
+        
+        # Main container (now scrollable)
+        main_container = ctk.CTkScrollableFrame(master=self.courses_frame, corner_radius=20, height=600)
+        main_container.pack(pady=40, padx=40, fill="both", expand=True)
+        
+        # Configure grid weights for responsiveness
+        main_container.grid_columnconfigure(0, weight=1)
+        main_container.grid_rowconfigure(1, weight=1)  # Selection container should expand
+        
+        # Header
+        header_frame = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        header_frame.pack(pady=(40, 20), padx=40, fill="x")
+        
+        title_label = ctk.CTkLabel(
+            master=header_frame,
+            text="Select Course",
+            font=ctk.CTkFont(size=28, weight="bold")
+        )
+        title_label.pack()
+        
+        subtitle_label = ctk.CTkLabel(
+            master=header_frame,
+            text="Choose the course you want to download materials from",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        subtitle_label.pack(pady=(5, 0))
+        
+        # Course selection container
+        selection_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        selection_container.pack(pady=40, padx=40, fill="x")
+        
+        course_label = ctk.CTkLabel(
+            master=selection_container,
+            text="Course",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        course_label.pack(pady=(0, 10), padx=5, anchor="w")
+        
+        self.course_select = ctk.CTkOptionMenu(
+            selection_container,
+            values=self.all_types,
+            height=45,
+            font=ctk.CTkFont(size=14),
+            command=self.on_course_selection
+        )
+        self.course_select.pack(pady=(0, 30), padx=5, fill="x")
+        
+        # Buttons container
+        buttons_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        buttons_container.pack(pady=20, padx=40, fill="x")
+        
+        self.next_button = ctk.CTkButton(
+            master=buttons_container,
+            text="Continue",
+            command=lambda: self.next_page(self.course_select.get()),
+            height=50,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        self.next_button.pack(pady=(0, 15), padx=5, fill="x")
+        
+        self.logout_button = ctk.CTkButton(
+            master=buttons_container,
+            text="Log Out",
+            command=self.prev_page,
+            height=45,
+            font=ctk.CTkFont(size=14),
+            fg_color="transparent",
+            border_width=2,
+            text_color="#ff6b6b",
+            border_color="#ff6b6b",
+            hover_color="#ff9999"
+        )
+        self.logout_button.pack(padx=5, fill="x")
+    
+    def create_download_page(self):
+        """Create the download page with checkboxes and organization dropdown/toggles"""
+        self.download_frame = ctk.CTkFrame(master=self.root, fg_color="transparent")
+        
+        # Main container (now scrollable)
+        main_container = ctk.CTkScrollableFrame(master=self.download_frame, corner_radius=20, height=600)
+        main_container.pack(pady=40, padx=40, fill="both", expand=True)
+        
+        # Header
+        header_frame = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        header_frame.pack(pady=(40, 20), padx=40, fill="x")
+        
+        self.course_title_label = ctk.CTkLabel(
+            master=header_frame,
+            text="Course Name",
+            font=ctk.CTkFont(size=24, weight="bold")
+        )
+        self.course_title_label.pack()
+        
+        subtitle_label = ctk.CTkLabel(
+            master=header_frame,
+            text="Select the content types you want to download",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        subtitle_label.pack(pady=(5, 0))
+        
+        # Organization dropdown and toggles
+        org_label = ctk.CTkLabel(
+            master=header_frame,
+            text="Folder Organization:",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        org_label.pack(pady=(18, 2), anchor="w")
+        self.org_modes = ["By type", "By week", "Flat"]
+        self.org_mode_map = {"By type": "type", "By week": "week", "Flat": "none"}
+        self.org_mode = "type"  # Default
+        self.include_week = True
+        self.include_type = False
+        def set_toggle_defaults(mode):
+            if mode == "type":
+                self.include_week = True
+                self.include_type = False
+            elif mode == "week":
+                self.include_week = False
+                self.include_type = True
+            else:
+                self.include_week = True
+                self.include_type = True
+            self.week_toggle_var.set(self.include_week)
+            self.type_toggle_var.set(self.include_type)
+        def on_org_mode_select(choice):
+            self.org_mode = self.org_mode_map[choice]
+            set_toggle_defaults(self.org_mode)
+            # Re-pack toggles to ensure spacing is applied after dropdown changes
+            self.week_toggle.pack_forget()
+            self.type_toggle.pack_forget()
+            self.week_toggle.pack(pady=(10, 0), anchor="w")
+            self.type_toggle.pack(pady=(8, 0), anchor="w")
+        self.org_dropdown = ctk.CTkOptionMenu(
+            master=header_frame,
+            values=self.org_modes,
+            command=on_org_mode_select
+        )
+        self.org_dropdown.set("By type")
+        self.org_dropdown.pack(pady=(0, 10), anchor="w")
+        # Toggles for week/type in filename
+        self.week_toggle_var = ctk.BooleanVar(value=True)
+        self.type_toggle_var = ctk.BooleanVar(value=False)
+        self.week_toggle = ctk.CTkCheckBox(
+            master=header_frame,
+            text="Include week number in file name",
+            variable=self.week_toggle_var
+        )
+        self.type_toggle = ctk.CTkCheckBox(
+            master=header_frame,
+            text="Include type in file name",
+            variable=self.type_toggle_var
+        )
+        # Show toggles by default with improved spacing
+        self.week_toggle.pack(pady=(10, 0), anchor="w")
+        self.type_toggle.pack(pady=(8, 0), anchor="w")
+        
+        # Scrollable content container
+        types_label = ctk.CTkLabel(
+            master=main_container,
+            text="Types:",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        types_label.pack(pady=(10, 0), padx=40, anchor="w")
+        content_container = ctk.CTkScrollableFrame(
+            master=main_container,
+            fg_color="transparent"
+        )
+        content_container.pack(pady=20, padx=40, fill="both", expand=True)
+        
+        self.checkboxes_container = content_container
+        
+        # Select All button container
+        select_all_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        select_all_container.pack(pady=(0, 20), padx=40, fill="x")
+        
+        # Configure grid weights for button layout
+        select_all_container.grid_columnconfigure(0, weight=1)
+        select_all_container.grid_columnconfigure(1, weight=1)
+        
+        self.select_all_button = ctk.CTkButton(
+            master=select_all_container,
+            text="Select All",
+            command=self.select_all_checkboxes,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#FF9800",
+            hover_color="#F57C00"
+        )
+        self.select_all_button.grid(row=0, column=0, padx=(5, 2.5), pady=5, sticky="ew")
+        
+        self.deselect_all_button = ctk.CTkButton(
+            master=select_all_container,
+            text="Deselect All",
+            command=self.deselect_all_checkboxes,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#9E9E9E",
+            hover_color="#757575"
+        )
+        self.deselect_all_button.grid(row=0, column=1, padx=(2.5, 5), pady=5, sticky="ew")
+        
+        # Output folder selection
+        output_folder_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        output_folder_container.pack(pady=(0, 20), padx=40, fill="x")
+        output_label = ctk.CTkLabel(
+            master=output_folder_container,
+            text="Output Folder:",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            anchor="w"
+        )
+        output_label.pack(side="left", padx=(0, 10))
+        self.output_folder_var = ctk.StringVar(value=self.output_folder or "No folder selected")
+        self.output_folder_display = ctk.CTkLabel(
+            master=output_folder_container,
+            textvariable=self.output_folder_var,
+            font=ctk.CTkFont(size=14),
+            text_color="gray",
+            anchor="w"
+        )
+        self.output_folder_display.pack(side="left", fill="x", expand=True)
+        browse_button = ctk.CTkButton(
+            master=output_folder_container,
+            text="Browse",
+            command=self.browse_output_folder,
+            height=32,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        browse_button.pack(side="right", padx=(10, 0))
+        
+        # Buttons container
+        buttons_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        buttons_container.pack(pady=20, padx=40, fill="x")
+        
+        self.download_button = ctk.CTkButton(
+            master=buttons_container,
+            text="Download Selected",
+            command=self.start_download,
+            height=50,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            fg_color="#4CAF50",
+            hover_color="#45a049"
+        )
+        self.download_button.pack(pady=(0, 15), padx=5, fill="x")
+        
+        self.back_button = ctk.CTkButton(
+            master=buttons_container,
+            text="Back",
+            command=self.prev_page,
+            height=45,
+            font=ctk.CTkFont(size=14),
+            fg_color="transparent",
+            border_width=2,
+            text_color="#2196F3",
+            border_color="#2196F3",
+            hover_color="#2196F3"
+        )
+        self.back_button.pack(padx=5, fill="x")
+    
+    def create_loading_page(self):
+        """Create the loading page with progress bar and animated spinner"""
+        self.loading_frame = ctk.CTkFrame(master=self.root, fg_color="transparent")
+        
+        # Main container (now scrollable)
+        main_container = ctk.CTkScrollableFrame(master=self.loading_frame, corner_radius=20, height=600)
+        main_container.pack(pady=40, padx=40, fill="both", expand=True)
+        
+        # Header
+        header_frame = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        header_frame.pack(pady=(40, 20), padx=40, fill="x")
+        
+        self.loading_title = ctk.CTkLabel(
+            master=header_frame,
+            text="Downloading Files",
+            font=ctk.CTkFont(size=28, weight="bold")
+        )
+        self.loading_title.pack()
+        
+        self.loading_subtitle = ctk.CTkLabel(
+            master=header_frame,
+            text="Please wait while we download your selected content",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        self.loading_subtitle.pack(pady=(5, 0))
+        
+        # Spinner container (above progress)
+        spinner_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        spinner_container.pack(pady=(40, 20), padx=40, fill="x")
+        
+        # Animated loading spinner
+        self.loading_spinner = LoadingSpinner(
+            master=spinner_container,
+            size=50,  # Made smaller
+            color="#4CAF50"
+        )
+        self.loading_spinner.pack()
+        
+        # Progress container
+        progress_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        progress_container.pack(pady=20, padx=40, fill="x")
+        
+        # Progress bar
+        self.progress_bar = ctk.CTkProgressBar(
+            master=progress_container,
+            height=20,
+            progress_color="#4CAF50"
+        )
+        self.progress_bar.pack(pady=(0, 20), padx=5, fill="x")
+        self.progress_bar.set(0)
+        
+        # Progress text
+        self.progress_text = ctk.CTkLabel(
+            master=progress_container,
+            text="0% Complete",
+            font=ctk.CTkFont(size=16, weight="bold")
+        )
+        self.progress_text.pack(pady=(0, 10))
+        
+        # File counter
+        self.file_counter = ctk.CTkLabel(
+            master=progress_container,
+            text="0 of 0 files downloaded",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        self.file_counter.pack(pady=(0, 20))
+        
+        # Current file label
+        self.current_file_label = ctk.CTkLabel(
+            master=progress_container,
+            text="Preparing download...",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.current_file_label.pack()
+        
+        # Cancel button
+        self.cancel_button = ctk.CTkButton(
+            master=progress_container,
+            text="Cancel Download",
+            command=self.cancel_download,
+            height=45,
+            font=ctk.CTkFont(size=14),
+            fg_color="transparent",
+            border_width=2,
+            text_color="#ff6b6b",
+            border_color="#ff6b6b",
+            hover_color="#ff9999"
+        )
+        self.cancel_button.pack(pady=(30, 0), padx=5, fill="x")
+    
+    def ensure_env_file(self):
+        if not os.path.exists(".env"):
+            with open(".env", "w") as f:
+                f.write("USERNAME=\nPASSWORD=\nOUTPUT_FOLDER=\n")
+    
+    def check_saved_credentials(self):
+        """Check for saved credentials and auto-login if available"""
+        username = os.getenv("USERNAME", "")
+        password = os.getenv("PASSWORD", "")
+        if username and password:
+            self.update_courses(username, password)
+            self.page_index = 1
+            self.show_page(1)
+        else:
+            self.show_page(0)
+    
+    def show_page(self, page_index):
+        """Show the specified page"""
+        self.page_index = page_index
+        for page in self.pages:
+            page.pack_forget()
+        self.pages[page_index].pack(pady=20, padx=40, fill="both", expand=True)
+        # Force GUI update to ensure proper redrawing
+        self.root.update_idletasks()
+        
+        # Special focus handling for courses page
+        if page_index == 1:  # Courses page
+            # Use after() to schedule focus change after the current event is processed
+            self.root.after(10, self._clear_focus)
+        
+        # Reset loading page state when entering download page
+        if page_index == 2:  # Download page
+            if hasattr(self, 'progress_bar'):
+                self.progress_bar.set(0)
+            if hasattr(self, 'progress_text'):
+                self.progress_text.configure(text="0% Complete")
+            if hasattr(self, 'file_counter'):
+                self.file_counter.configure(text="0 of 0 files downloaded")
+            if hasattr(self, 'current_file_label'):
+                self.current_file_label.configure(text="Preparing download...")
+            if hasattr(self, 'download_button'):
+                self.download_button.configure(text="Download Selected", state="normal")
+    
+    def next_page(self, selected_course):
+        """Navigate to next page"""
+        if self.page_index < len(self.pages) - 2:  # Exclude loading page
+            if self.page_index == 1:  # From courses to download page
+                # Check if selected item is a session header
+                if selected_course.startswith("---") and selected_course.endswith("---"):
+                    # Show error popup for session header selection
+                    self.show_session_header_error()
+                    return
+                
+                username, password = self.get_credentials()
+                # Extract actual course name from formatted selection
+                actual_course_name = selected_course.strip()
+                update_course_url(username, password, actual_course_name)
+                self.render_checkboxes()
+            self.show_page(self.page_index + 1)
+    
+    def prev_page(self):
+        """Navigate to previous page"""
+        if self.page_index > 0:
+            if self.page_index == 0:  # Clear credentials when going back to login
+                set_key(".env", "USERNAME", "")
+                set_key(".env", "PASSWORD", "")
+                load_dotenv(override=True)
+            self.show_page(self.page_index - 1)
+    
+    def get_credentials(self):
+        """Get saved credentials"""
+        return [os.getenv("USERNAME", ""), os.getenv("PASSWORD", "")]
+    
+    def update_courses(self, username, password):
+        """Update course list"""
+        all_courses = get_courses(username, password)
+        self.course_select.configure(values=all_courses)
+        
+        # Set initial selection to first actual course (not session header)
+        initial_selection = "--"
+        for course in all_courses:
+            if not course.startswith("---") and not course.endswith("---"):
+                initial_selection = course
+                break
+        
+        self.course_select.set(initial_selection)
+        
+        # Set initial button state
+        if initial_selection == "--":
+            self.next_button.configure(state="disabled")
+        else:
+            self.next_button.configure(state="normal")
+        
+        # Use after() to schedule focus change after the current event is processed
+        self.root.after(10, self._clear_focus)
+    
+    def render_checkboxes(self):
+        """Render checkboxes for content types"""
+        username, password = self.get_credentials()
+        get_types_output = get_types(username, password)
+        all_types = get_types_output.get('types', [])
+        course_name = get_types_output.get('course_name', 'Unknown Course')
+        
+        # Update course title
+        self.course_title_label.configure(text=course_name)
+        
+        # Clear existing checkboxes
+        for widget in self.checkboxes_container.winfo_children():
+            widget.destroy()
+        
+        # Create new checkboxes
+        self.checkboxes = {}
+        for content_type in all_types:
+            checkbox = ctk.CTkCheckBox(
+                master=self.checkboxes_container,
+                text=content_type,
+                font=ctk.CTkFont(size=14),
+                checkbox_width=20,
+                checkbox_height=20
+            )
+            checkbox.pack(pady=8, padx=10, anchor="w", fill="x")
+            self.checkboxes[content_type] = checkbox
+    
+    def get_selected_types(self):
+        """Get selected content types"""
+        username, password = self.get_credentials()
+        selected = []
+        get_types_output = get_types(username, password)
+        all_types = get_types_output.get('types', [])
+        
+        for content_type in all_types:
+            if self.checkboxes.get(content_type) and self.checkboxes[content_type].get() == 1:
+                selected.append(content_type)
+        return selected
+    
+    def login_gui(self):
+        """Handle login"""
+        username = self.username_entry.get()
+        password = self.password_entry.get()
+        
+        if not username or not password:
+            self.show_error("Please enter both username and password")
+            return
+        
+        # Show loading state
+        self.login_button.configure(text="Signing In...", state="disabled")
+        self.root.update()
+        
+        # Try login
+        login_state = login(username=username, password=password)
+        
+        if login_state:
+            # Save credentials to .env
+            set_key(".env", "USERNAME", username)
+            set_key(".env", "PASSWORD", password)
+            load_dotenv(override=True)
+            self.update_courses(username, password)
+            self.next_page(self.course_select.get())
+        else:
+            self.show_error("Invalid credentials. Please try again.")
+        
+        # Reset button
+        self.login_button.configure(text="Sign In", state="normal")
+    
+    def show_error(self, message):
+        """Show error message"""
+        self.error_label.configure(text=message)
+        self.error_label.pack(pady=(0, 20), padx=5)
+        self.root.after(3000, lambda: self.error_label.pack_forget())
+    
+    def start_download(self):
+        """Start the download process"""
+        selected_types = self.get_selected_types()
+        
+        if not selected_types:
+            # Show popup asking user to select at least one filter
+            self.show_no_filters_popup()
+            return
+        
+        if not self.output_folder:
+            self.show_no_output_folder_popup()
+            return
+        
+        # Change button text to Processing... and disable it
+        if hasattr(self, 'download_button'):
+            self.download_button.configure(text="Processing...", state="disabled")
+        self.root.update_idletasks()
+        
+        # Switch to loading page
+        self.show_page(3)  # Loading page
+        
+        # Start the loading spinner animation
+        self.loading_spinner.start_animation()
+        
+        # Start download in separate thread
+        self.is_downloading = True
+        self.current_download_thread = threading.Thread(
+            target=self.download_thread,
+            args=(selected_types, self.org_mode, self.week_toggle_var.get(), self.type_toggle_var.get())
+        )
+        self.current_download_thread.start()
+    
+    def show_no_filters_popup(self):
+        """Show popup dialog when no filters are selected"""
+        # Create popup window
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("No Filters Selected")
+        popup.geometry("400x200")
+        popup.resizable(False, False)
+        
+        # Center the popup on the main window
+        popup.transient(self.root)
+        popup.grab_set()  # Make popup modal
+        
+        # Center the popup
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth() // 2) - (400 // 2)
+        y = (popup.winfo_screenheight() // 2) - (200 // 2)
+        popup.geometry(f'400x200+{x}+{y}')
+        
+        # Main container
+        main_container = ctk.CTkFrame(master=popup, corner_radius=15)
+        main_container.pack(pady=20, padx=20, fill="both", expand=True)
+        
+        # Icon and title
+        icon_label = ctk.CTkLabel(
+            master=main_container,
+            text="⚠️",
+            font=ctk.CTkFont(size=32)
+        )
+        icon_label.pack(pady=(20, 10))
+        
+        title_label = ctk.CTkLabel(
+            master=main_container,
+            text="No Filters Selected",
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        title_label.pack(pady=(0, 10))
+        
+        message_label = ctk.CTkLabel(
+            master=main_container,
+            text="Please select at least one content type\nto download before proceeding.",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        message_label.pack(pady=(0, 20))
+        
+        # OK button
+        ok_button = ctk.CTkButton(
+            master=main_container,
+            text="OK",
+            command=popup.destroy,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        ok_button.pack(pady=(0, 20), padx=20, fill="x")
+        
+        # Focus on the popup and make it modal
+        popup.focus_set()
+        popup.wait_window()
+    
+    def download_thread(self, selected_types, org_mode, include_week, include_type):
+        """Download thread to prevent GUI freezing"""
+        username, password = self.get_credentials()
+        
+        # Get total files before starting download
+        total_files = get_total_files(username, password, selected_types)
+        self.root.after(0, lambda: self.file_counter.configure(text=f"0 of {total_files} files downloaded"))
+        
+        def progress_callback(downloaded, total, current_file, file_progress_str=None):
+            if not self.is_downloading:
+                return
+            # Update progress on main thread
+            self.root.after(0, lambda: self.update_progress(downloaded, total, current_file, file_progress_str))
+        
+        def cancellation_check():
+            return not self.is_downloading
+        
+        try:
+            download_content(username, password, selected_types, progress_callback, cancellation_check, self.output_folder, org_mode, include_week, include_type)
+            
+            # Download completed
+            if self.is_downloading:
+                self.root.after(0, self.download_completed)
+        except Exception as e:
+            if self.is_downloading:
+                self.root.after(0, lambda: self.download_error(str(e)))
+    
+    def update_progress(self, downloaded, total, current_file, file_progress_str=None):
+        """Update progress bar and labels, including per-file progress if available"""
+        if total > 0:
+            progress = downloaded / total
+            self.progress_bar.set(progress)
+            self.progress_text.configure(text=f"{int(progress * 100)}% Complete")
+            self.file_counter.configure(text=f"{downloaded} of {total} files downloaded")
+            if file_progress_str == "VoD":
+                self.current_file_label.configure(text=f"Downloading (VoD): {current_file}")
+            elif file_progress_str:
+                self.current_file_label.configure(text=f"Downloading: {current_file} ({file_progress_str})")
+            else:
+                self.current_file_label.configure(text=f"Downloading: {current_file}")
+    
+    def download_completed(self):
+        """Handle download completion"""
+        # Stop the spinner animation
+        self.loading_spinner.stop_animation()
+        
+        self.progress_bar.set(1.0)
+        self.progress_text.configure(text="100% Complete")
+        self.current_file_label.configure(text="Download completed successfully!")
+        
+        # Show completion message and return to download page
+        self.root.after(2000, lambda: self.show_page(2))
+    
+    def download_error(self, error_message):
+        """Handle download error"""
+        # Stop the spinner animation
+        self.loading_spinner.stop_animation()
+        
+        self.current_file_label.configure(text=f"Error: {error_message}")
+        self.root.after(3000, lambda: self.show_page(2))
+    
+    def cancel_download(self):
+        """Cancel the current download"""
+        # Stop the spinner animation
+        self.loading_spinner.stop_animation()
+        
+        self.is_downloading = False
+        self.current_file_label.configure(text="Download cancelled")
+        # Immediately return to download page since cancellation is now properly handled
+        self.show_page(2)
+        # Force GUI update to prevent blank page
+        self.root.update()
+        self.root.update_idletasks()
 
-def get_selected():
-    [username, password] = getCredentials()
-    selected = []
-    all_types = get_types(username, password).get('types')
-    for type in all_types:
-        if checkboxes[type].get() == 1:
-            selected.append(type)
-    return selected
+    def select_all_checkboxes(self):
+        """Select all checkboxes"""
+        for checkbox in self.checkboxes.values():
+            checkbox.select()
 
+    def deselect_all_checkboxes(self):
+        """Deselect all checkboxes"""
+        for checkbox in self.checkboxes.values():
+            checkbox.deselect()
 
-def loginGUI(username, password):
-    global input_username, input_password
+    def on_course_selection(self, selection):
+        """Handle course selection from dropdown"""
+        # Check if the selection is a session header
+        if selection.startswith("---") and selection.endswith("---"):
+            # Disable the continue button for session headers
+            self.next_button.configure(state="disabled")
+        else:
+            # Enable the continue button for actual courses
+            self.next_button.configure(state="normal")
+        
+        # Use after() to schedule focus change after the current event is processed
+        self.root.after(10, self._clear_focus)
+    
+    def _clear_focus(self):
+        """Clear focus from dropdown and set it to the root window"""
+        # Clear focus from the dropdown
+        self.course_select.focus_set()
+        self.course_select.focus_force()
+        
+        # Then immediately clear focus to root window
+        self.root.focus_set()
+        self.root.focus_force()
+        
+        # Force GUI update to ensure focus change takes effect
+        self.root.update_idletasks()
 
-    loginState = login(username=username, password=password)
+    def show_session_header_error(self):
+        """Show popup dialog when user tries to select a session header"""
+        # Create popup window
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Invalid Selection")
+        popup.geometry("400x200")
+        popup.resizable(False, False)
+        
+        # Center the popup on the main window
+        popup.transient(self.root)
+        popup.grab_set()  # Make popup modal
+        
+        # Center the popup
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth() // 2) - (400 // 2)
+        y = (popup.winfo_screenheight() // 2) - (200 // 2)
+        popup.geometry(f'400x200+{x}+{y}')
+        
+        # Main container
+        main_container = ctk.CTkFrame(master=popup, corner_radius=15)
+        main_container.pack(pady=20, padx=20, fill="both", expand=True)
+        
+        # Icon and title
+        icon_label = ctk.CTkLabel(
+            master=main_container,
+            text="⚠️",
+            font=ctk.CTkFont(size=32)
+        )
+        icon_label.pack(pady=(20, 10))
+        
+        title_label = ctk.CTkLabel(
+            master=main_container,
+            text="Invalid Selection",
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        title_label.pack(pady=(0, 10))
+        
+        message_label = ctk.CTkLabel(
+            master=main_container,
+            text="Please select a specific course,\nnot a session header.",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        message_label.pack(pady=(0, 20))
+        
+        # OK button
+        ok_button = ctk.CTkButton(
+            master=main_container,
+            text="OK",
+            command=popup.destroy,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        ok_button.pack(pady=(0, 20), padx=20, fill="x")
+        
+        # Focus on the popup and make it modal
+        popup.focus_set()
+        popup.wait_window()
 
-    if (loginState):
-        with open("cms_downloader.config", "w") as file:
-            file.write("username="+username)
-            file.write("\npassword="+password)
-            file.close()
-        update_courses(username, password)
-        next_page(type_select.get())
-    else:
-        print("Error baby")
-        error_label.pack(pady=12, padx=10)
+    def load_last_output_folder(self):
+        folder = os.getenv("OUTPUT_FOLDER", None)
+        if folder:
+            self.output_folder = folder
 
+    def save_last_output_folder(self):
+        set_key(".env", "OUTPUT_FOLDER", self.output_folder or "")
+        load_dotenv(override=True)
 
+    def browse_output_folder(self):
+        folder_selected = filedialog.askdirectory()
+        if folder_selected:
+            self.output_folder = folder_selected
+            self.output_folder_var.set(folder_selected)
+            self.save_last_output_folder()
 
-# Login Page
-login_frame = customtkinter.CTkFrame(master=root)
-# login_frame.pack(pady=20, padx=60, fill="both", expand=True)
+    def show_no_output_folder_popup(self):
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("No Output Folder Selected")
+        popup.geometry("400x200")
+        popup.resizable(False, False)
+        popup.transient(self.root)
+        popup.grab_set()
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth() // 2) - (400 // 2)
+        y = (popup.winfo_screenheight() // 2) - (200 // 2)
+        popup.geometry(f'400x200+{x}+{y}')
+        main_container = ctk.CTkFrame(master=popup, corner_radius=15)
+        main_container.pack(pady=20, padx=20, fill="both", expand=True)
+        icon_label = ctk.CTkLabel(
+            master=main_container,
+            text="⚠️",
+            font=ctk.CTkFont(size=32)
+        )
+        icon_label.pack(pady=(20, 10))
+        title_label = ctk.CTkLabel(
+            master=main_container,
+            text="No Output Folder Selected",
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        title_label.pack(pady=(0, 10))
+        message_label = ctk.CTkLabel(
+            master=main_container,
+            text="Please select an output folder before downloading.",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        message_label.pack(pady=(0, 20))
+        def on_ok():
+            popup.destroy()
+            # Only retry if output_folder is now set
+            if self.output_folder:
+                self.start_download()
+        ok_button = ctk.CTkButton(
+            master=main_container,
+            text="OK",
+            command=on_ok,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        ok_button.pack(pady=(0, 20), padx=20, fill="x")
+        popup.focus_set()
+        popup.wait_window()
 
-label = customtkinter.CTkLabel(master=login_frame, text="CMS Downloader")
-label.pack(pady=12, padx=10)
-
-error_label = customtkinter.CTkLabel(master=login_frame, text="Error. Please Check Credentials", fg_color='#f00')
-
-username = customtkinter.CTkEntry(master=login_frame, placeholder_text="Username")
-username.pack(pady=12, padx=10)
-
-password = customtkinter.CTkEntry(master=login_frame, placeholder_text="Password", show="*")
-password.pack(pady=12, padx=10)
-
-login_button = customtkinter.CTkButton(master=login_frame, text="Login", command= lambda: loginGUI(username=username.get(), password=password.get()))
-login_button.pack(pady=12, padx=10)
-
-
-# Course Select Page
-courses_frame = customtkinter.CTkFrame(master=root)
-
-courses_label = customtkinter.CTkLabel(master=courses_frame, text="Choose a course")
-courses_label.pack(pady=12, padx=10)
-
-type_select = customtkinter.CTkOptionMenu(courses_frame, values=all_types)
-type_select.pack(pady=12, padx=10)
-
-next_button = customtkinter.CTkButton(master=courses_frame, text="Next", command= lambda: next_page(type_select.get()))
-logout_button = customtkinter.CTkButton(master=courses_frame, text="Log Out", command= prev_page)
-
-
-# Download Page
-download_frame = customtkinter.CTkFrame(master=root)
-
-course_label = customtkinter.CTkLabel(master=download_frame, text="")
-# course_label.pack(pady=12, padx=10)
-
-checkboxes = {}
-checkboxes[""] = customtkinter.CTkCheckBox(download_frame, text=type)
-
-download_button = customtkinter.CTkButton(master=download_frame, text="Download", command= start_download)
-back_button = customtkinter.CTkButton(master=download_frame, text="Back", command= prev_page)
-# download_button.pack(pady=12, padx=10)
-
-config_username = getCredentials()[0]
-config_password = getCredentials()[1]
-if config_username != "" and config_password != "":
-    update_courses(config_username, config_password)
-    page_index = 1
-    courses_frame.pack(pady=20, padx=60, fill="both", expand=True)
-else:
-    login_frame.pack(pady=20, padx=60, fill="both", expand=True)
-
-
-pages = [login_frame, courses_frame, download_frame]
-root.mainloop()
+if __name__ == "__main__":
+    app = ModernCMSDownloader()
