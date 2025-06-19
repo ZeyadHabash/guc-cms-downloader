@@ -5,18 +5,11 @@ import requests
 import tempfile
 import subprocess
 import ctypes
-
-# Try to import py7zr, install if missing
-try:
-    import py7zr
-except ImportError:
-    print("py7zr not found. Installing py7zr...")
-    subprocess.check_call([sys.executable, '-m', 'pip', 'install', 'py7zr'])
-    import py7zr
+import zipfile
 
 # URLs
 YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/2025.06.09/yt-dlp.exe"
-FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.2-essentials_build.7z"
+FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.2-essentials_build.zip"
 
 # Destination folder
 DEST_FOLDER = r"C:\tools\yt-dlp"
@@ -41,10 +34,10 @@ def download_file(url, dest):
                     f.write(chunk)
     print(f"Saved to {dest}")
 
-def extract_ffmpeg_7z(archive_path, dest_folder):
+def extract_ffmpeg_zip(archive_path, dest_folder):
     print(f"Extracting {archive_path} ...")
-    with py7zr.SevenZipFile(archive_path, mode='r') as z:
-        z.extractall(path=dest_folder)
+    with zipfile.ZipFile(archive_path, 'r') as z:
+        z.extractall(dest_folder)
     print(f"Extracted to {dest_folder}")
 
 def find_ffmpeg_exe(extract_root):
@@ -75,9 +68,9 @@ def main():
 
     # 2. Download and extract ffmpeg
     with tempfile.TemporaryDirectory() as tmpdir:
-        archive_path = os.path.join(tmpdir, 'ffmpeg.7z')
+        archive_path = os.path.join(tmpdir, 'ffmpeg.zip')
         download_file(FFMPEG_URL, archive_path)
-        extract_ffmpeg_7z(archive_path, tmpdir)
+        extract_ffmpeg_zip(archive_path, tmpdir)
         ffmpeg_exe = find_ffmpeg_exe(tmpdir)
         if not ffmpeg_exe:
             print("Could not find ffmpeg.exe in the extracted archive!")

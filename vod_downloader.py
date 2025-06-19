@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 
 def download_single_video(content_id, output_filename=None, username=None, password=None):
     """
@@ -79,7 +80,16 @@ def download_single_video(content_id, output_filename=None, username=None, passw
                 # Use yt-dlp with ffmpeg for better quality
                 # Allow overriding yt-dlp and ffmpeg paths via environment variables
                 yt_dlp_path = os.environ.get('YTDLP_PATH', 'yt-dlp')
-                ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
+                # --- Begin cross-platform ffmpeg path logic ---
+                ffmpeg_env = os.environ.get('FFMPEG_PATH')
+                if ffmpeg_env:
+                    ffmpeg_path = ffmpeg_env
+                else:
+                    if sys.platform.startswith('win'):
+                        ffmpeg_path = 'ffmpeg'
+                    else:
+                        ffmpeg_path = shutil.which('ffmpeg') or 'ffmpeg'
+                # --- End cross-platform ffmpeg path logic ---
                 print(f"DEBUG: yt_dlp_path = {yt_dlp_path}")
                 print(f"DEBUG: ffmpeg_path = {ffmpeg_path}")
                 cmd = [
