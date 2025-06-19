@@ -9,7 +9,7 @@ import zipfile
 
 # URLs
 YTDLP_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/2025.06.09/yt-dlp.exe"
-FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-7.0.2-essentials_build.zip"
+FFMPEG_URL = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
 
 # Destination folder
 DEST_FOLDER = r"C:\tools\yt-dlp"
