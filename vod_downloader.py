@@ -77,9 +77,13 @@ def download_single_video(content_id, output_filename=None, username=None, passw
                 print("Starting download with enhanced quality...")
                 
                 # Use yt-dlp with ffmpeg for better quality
+                # Allow overriding yt-dlp and ffmpeg paths via environment variables
+                yt_dlp_path = os.environ.get('YTDLP_PATH', 'yt-dlp')
+                ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
                 cmd = [
-                    'yt-dlp',
+                    yt_dlp_path,
                     '--downloader', 'ffmpeg',
+                    '--ffmpeg-location', ffmpeg_path,
                     '--hls-use-mpegts',
                     '-o', output_filename,
                     hls_url
