@@ -4,6 +4,7 @@ import shutil
 import requests
 import tempfile
 import subprocess
+import ctypes
 
 # Try to import py7zr, install if missing
 try:
@@ -23,6 +24,12 @@ YTDLP_DEST = os.path.join(DEST_FOLDER, "yt-dlp.exe")
 FFMPEG_DEST = os.path.join(DEST_FOLDER, "ffmpeg.exe")
 
 os.makedirs(DEST_FOLDER, exist_ok=True)
+
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
 
 def download_file(url, dest):
     print(f"Downloading {url} ...")
@@ -48,11 +55,18 @@ def find_ffmpeg_exe(extract_root):
     return None
 
 def set_env_var_win(name, value):
-    # Set persistent user env var
-    subprocess.run(['setx', name, value], check=True)
-    print(f"Set {name} to {value} (persistent for user)")
+    # Set persistent system env var (all users)
+    subprocess.run(['setx', name, value, '/M'], check=True)
+    print(f"Set {name} to {value} (system-wide, all users)")
 
 def main():
+    print("This script requires administrator privileges to set system-wide environment variables.")
+    print("To run as admin: Right-click on Command Prompt or PowerShell and choose 'Run as administrator', or run this script from an admin terminal.")
+    if not is_admin():
+        print("\nERROR: This script must be run as administrator to set system-wide environment variables.")
+        print("Please re-run this script as administrator.")
+        sys.exit(1)
+
     # 1. Download yt-dlp.exe
     if not os.path.exists(YTDLP_DEST):
         download_file(YTDLP_URL, YTDLP_DEST)
@@ -71,14 +85,14 @@ def main():
         shutil.copy2(ffmpeg_exe, FFMPEG_DEST)
         print(f"Copied ffmpeg.exe to {FFMPEG_DEST}")
 
-    # 3. Set environment variables
+    # 3. Set environment variables (system-wide)
     set_env_var_win('YTDLP_PATH', YTDLP_DEST)
     set_env_var_win('FFMPEG_PATH', FFMPEG_DEST)
 
     print("\nSetup complete!")
     print(f"yt-dlp.exe: {YTDLP_DEST}")
     print(f"ffmpeg.exe: {FFMPEG_DEST}")
-    print("\nYou may need to restart your terminal or log out/in for the environment variables to take effect.")
+    print("\nYou may need to restart your computer or log out/in for the environment variables to take effect for all users.")
 
 if __name__ == "__main__":
     main()
