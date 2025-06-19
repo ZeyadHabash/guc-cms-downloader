@@ -295,14 +295,14 @@ def download_content(username, password, types, progress_callback=None, cancella
             root_folder = output_folder if output_folder else os.getcwd()
 
             # Create session folder first
-            session_folder = os.path.join(root_folder, current_session_name)
+            session_folder = os.path.join(root_folder, current_session_name.rstrip())
             try:
                 os.makedirs(session_folder, exist_ok=True)
             except OSError as error:
                 print(error)
 
             # Create course folder inside session folder
-            course_folder_path = os.path.join(session_folder, course_name)
+            course_folder_path = os.path.join(session_folder, course_name.rstrip())
             try:
                 os.makedirs(course_folder_path, exist_ok=True)
             except OSError as error:
@@ -311,7 +311,7 @@ def download_content(username, password, types, progress_callback=None, cancella
             # Determine file path base depending on org_mode and toggles
             if org_mode == 'type':
                 # Use the mapped filter name for the subfolder (or fallback to file content type)
-                filter_name = content_type_mapping.get(file_content_type, file_content_type)
+                filter_name = content_type_mapping.get(file_content_type, file_content_type).rstrip()
                 filter_folder = os.path.join(course_folder_path, filter_name)
                 try:
                     os.makedirs(filter_folder, exist_ok=True)
@@ -320,16 +320,16 @@ def download_content(username, password, types, progress_callback=None, cancella
                 # Filename prefix logic
                 name_parts = []
                 if include_week and week_num:
-                    name_parts.append(f"Week {week_num}")
+                    name_parts.append(f"Week {str(week_num).rstrip()}")
                 if include_type:
-                    name_parts.append(f"({file_content_type})")
-                name_parts.append(lecture_title)
-                file_name = " - ".join(name_parts)
+                    name_parts.append(f"({file_content_type.rstrip()})")
+                name_parts.append(lecture_title.rstrip())
+                file_name = " - ".join(name_parts).rstrip()
                 file_path_base = os.path.join(filter_folder, file_name)
             elif org_mode == 'week':
                 # Organize by week number
-                week_folder = f"Week {week_num}" if week_num else "No Week"
-                week_folder_path = os.path.join(course_folder_path, week_folder)
+                week_folder = f"Week {str(week_num).rstrip()}" if week_num else "No Week"
+                week_folder_path = os.path.join(course_folder_path, week_folder.rstrip())
                 try:
                     os.makedirs(week_folder_path, exist_ok=True)
                 except OSError as error:
@@ -337,24 +337,24 @@ def download_content(username, password, types, progress_callback=None, cancella
                 # Filename prefix logic
                 name_parts = []
                 if include_week and week_num:
-                    name_parts.append(f"Week {week_num}")
+                    name_parts.append(f"Week {str(week_num).rstrip()}")
                 if include_type:
-                    name_parts.append(f"({file_content_type})")
-                name_parts.append(lecture_title)
-                file_name = " - ".join(name_parts)
+                    name_parts.append(f"({file_content_type.rstrip()})")
+                name_parts.append(lecture_title.rstrip())
+                file_name = " - ".join(name_parts).rstrip()
                 file_path_base = os.path.join(week_folder_path, file_name)
             else:
                 # Flat structure
                 name_parts = []
                 if include_week and week_num:
-                    name_parts.append(f"Week {week_num}")
+                    name_parts.append(f"Week {str(week_num).rstrip()}")
                 if include_type:
-                    name_parts.append(f"({file_content_type})")
-                name_parts.append(lecture_title)
-                file_name = " - ".join(name_parts)
+                    name_parts.append(f"({file_content_type.rstrip()})")
+                name_parts.append(lecture_title.rstrip())
+                file_name = " - ".join(name_parts).rstrip()
                 file_path_base = os.path.join(course_folder_path, file_name)
 
-            if file_content_type.lower() == "vod":
+            if file_content_type.lower().rstrip() == "vod":
                 file_path = file_path_base + ".mkv"
                 # Check if file already exists, skip if so
                 if os.path.exists(file_path):
