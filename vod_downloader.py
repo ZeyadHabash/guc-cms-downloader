@@ -80,6 +80,8 @@ def download_single_video(content_id, output_filename=None, username=None, passw
                 # Allow overriding yt-dlp and ffmpeg paths via environment variables
                 yt_dlp_path = os.environ.get('YTDLP_PATH', 'yt-dlp')
                 ffmpeg_path = os.environ.get('FFMPEG_PATH', 'ffmpeg')
+                print(f"DEBUG: yt_dlp_path = {yt_dlp_path}")
+                print(f"DEBUG: ffmpeg_path = {ffmpeg_path}")
                 cmd = [
                     yt_dlp_path,
                     '--downloader', 'ffmpeg',
