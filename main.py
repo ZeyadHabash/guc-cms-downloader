@@ -1,7 +1,7 @@
 import requests
 from requests.adapters import HTTPAdapter
 from requests_ntlm import HttpNtlmAuth
-from selectolax.parser import HTMLParser
+from bs4 import BeautifulSoup
 import os
 from dataclasses import dataclass, asdict
 from scraper import parse_courses_html_from_url
@@ -48,11 +48,12 @@ def update_course_url(username, password, selected_course):
             print("An Error Occurred. Check Credentials And Try Again.")
             return
     
-    html = HTMLParser(resp.text)
-    all_courses = html.css("table#ContentPlaceHolderright_ContentPlaceHoldercontent_GridViewcourses tr")[1:]
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    all_courses = soup.select("table#ContentPlaceHolderright_ContentPlaceHoldercontent_GridViewcourses tr")[1:]
 
     for course in all_courses:
-        course_name = course.css("td")[1].text()
+        tds = course.find_all("td")
+        course_name = tds[1].get_text()
         # Use the same parsing logic as the scraper to remove pipes and brackets
         # Use regex to extract code and name, ignore all bracketed content at the end
         match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
@@ -67,7 +68,7 @@ def update_course_url(username, password, selected_course):
         # Normalize whitespace to a single space
         clean_name = re.sub(r"\s+", " ", clean_name)
         if selected_course == clean_name:
-            course_url = "/apps/student/CourseViewStn.aspx?id=" + course.css("td")[4].text() + "&sid=" + course.css("td")[5].text()
+            course_url = "/apps/student/CourseViewStn.aspx?id=" + tds[4].get_text() + "&sid=" + tds[5].get_text()
             current_session_name = "Unknown Session"  # Fallback session name
             break
     
@@ -86,12 +87,13 @@ def get_courses(username, password):
                 print("An Error Occurred. Check Credentials And Try Again.")
                 return []
         
-        html = HTMLParser(resp.text)
+        soup = BeautifulSoup(resp.text, 'html.parser')
         final_courses=[]
-        all_courses = html.css("table#ContentPlaceHolderright_ContentPlaceHoldercontent_GridViewcourses tr")[1:]
+        all_courses = soup.select("table#ContentPlaceHolderright_ContentPlaceHoldercontent_GridViewcourses tr")[1:]
 
         for course in all_courses:
-            course_name = course.css("td")[1].text()
+            tds = course.find_all("td")
+            course_name = tds[1].get_text()
             # Use the same parsing logic as the scraper to remove pipes and brackets
             # Use regex to extract code and name, ignore all bracketed content at the end
             match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
@@ -152,9 +154,9 @@ def get_types(username, password):
             print("An Error Occurred. Check Credentials And Try Again.")
             return {'exam_sched': [], 'success' : False}
     
-    html = HTMLParser(resp.text)
-    all_cards = html.css(".card-body")
-    course_name = html.css_first("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").text()
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    all_cards = soup.select(".card-body")
+    course_name = soup.select_one("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").get_text()
     # Use the same parsing logic as the scraper to remove pipes and brackets
     # Use regex to extract code and name, ignore all bracketed content at the end
     match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
@@ -171,7 +173,7 @@ def get_types(username, password):
     all_types = []
 
     for card in all_cards:
-            title = card.css_first("div").text().strip().split("\n")[0]
+            title = card.find("div").get_text().strip().split("\n")[0]
             # Extract content type from the last set of parentheses
             last_open = title.rfind("(")
             last_close = title.rfind(")")
@@ -195,20 +197,20 @@ def download_content(username, password, types, progress_callback=None, cancella
             print("An Error Occurred. Check Credentials And Try Again.")
             return {'exam_sched': [], 'success' : False}
 
-    html = HTMLParser(resp.text)
+    soup = BeautifulSoup(resp.text, 'html.parser')
 
     # 1. Parse weeks, reverse them to be in chronological order, and map content to a week number
     content_to_week_map = {}
-    all_weeks = html.css(".card.mb-5.weeksdata")
-    all_weeks.reverse() # Weeks in HTML are newest to oldest, reverse for chronological order (Week 1, 2, 3...)
+    all_weeks = soup.select(".card.mb-5.weeksdata")
+    all_weeks = list(reversed(all_weeks)) # Weeks in HTML are newest to oldest, reverse for chronological order (Week 1, 2, 3...)
 
     for week_number, week_div in enumerate(all_weeks, 1):
-        content_items = week_div.css("div[id^=content]")
+        content_items = week_div.select("div[id^=content]")
         for item in content_items:
-            content_id = item.id
+            content_id = item.get("id")
             content_to_week_map[content_id] = week_number
 
-    all_cards = html.css(".card-body")
+    all_cards = soup.select(".card-body")
     all_types = []
 
     # Count total files to download for progress tracking
@@ -216,7 +218,7 @@ def download_content(username, password, types, progress_callback=None, cancella
     files_to_download = []
 
     for card in all_cards:
-            title = card.css_first("div").text().strip().split("\n")[0]
+            title = card.find("div").get_text().strip().split("\n")[0]
             # Extract content type from the last set of parentheses
             last_open = title.rfind("(")
             last_close = title.rfind(")")
@@ -234,7 +236,7 @@ def download_content(username, password, types, progress_callback=None, cancella
     # This handles cases where the file's internal type doesn't exactly match the filter name
     content_type_mapping = {}
     for card in all_cards:
-        file_content_type = card.css_first("div").text().strip().split("\n")[0]
+        file_content_type = card.find("div").get_text().strip().split("\n")[0]
         # Extract content type from the last set of parentheses
         last_open = file_content_type.rfind("(")
         last_close = file_content_type.rfind(")")
@@ -259,7 +261,7 @@ def download_content(username, password, types, progress_callback=None, cancella
             print("Download cancelled by user")
             return all_types
 
-        file_content_type = card.css_first("div").text().strip().split("\n")[0]
+        file_content_type = card.find("div").get_text().strip().split("\n")[0]
         # Extract content type from the last set of parentheses
         last_open = file_content_type.rfind("(")
         last_close = file_content_type.rfind(")")
@@ -267,7 +269,7 @@ def download_content(username, password, types, progress_callback=None, cancella
             file_content_type = file_content_type[last_open + 1 : last_close]
 
         if (file_content_type in types):
-            course_name = html.css_first("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").text()
+            course_name = soup.select_one("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").get_text()
             # Use the same parsing logic as the scraper to remove pipes and brackets
             # Use regex to extract code and name, ignore all bracketed content at the end
             match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
@@ -283,11 +285,11 @@ def download_content(username, password, types, progress_callback=None, cancella
             course_name = re.sub(r"\s+", " ", course_name)
 
             # 2. Get week number and create the new prefixed title
-            content_id_div = card.css_first("div[id^=content]")
-            content_id = content_id_div.id if content_id_div else None
+            content_id_div = card.select_one("div[id^=content]")
+            content_id = content_id_div.get("id") if content_id_div else None
             week_num = content_to_week_map.get(content_id) if content_id else None
 
-            lecture_title_raw = card.css_first("div strong").text()
+            lecture_title_raw = card.select_one("div strong").get_text()
             # Remove the numeric prefix like "1 - " to get the base title
             lecture_title = re.sub(r'^\d+\s*-\s*', '', lecture_title_raw).strip()
 
@@ -365,9 +367,9 @@ def download_content(username, password, types, progress_callback=None, cancella
                     continue
 
                 # Find the input with class 'vodbutton' and get its id as contentId
-                vod_input = card.css_first("input.vodbutton")
+                vod_input = card.select_one("input.vodbutton")
                 if vod_input is not None:
-                    vod_content_id = vod_input.attributes.get('id')
+                    vod_content_id = vod_input.get('id')
                     if vod_content_id:
                         # Call the VoD downloader
                         download_single_video(vod_content_id, file_path, username, password)
@@ -383,12 +385,12 @@ def download_content(username, password, types, progress_callback=None, cancella
                     continue
             else:
                 # Regular file download
-                link_tag = card.css_first("a")
-                if not link_tag or not link_tag.attributes.get('href'):
+                link_tag = card.find("a")
+                if not link_tag or not link_tag.get('href'):
                     print(f"Could not find download link for: {lecture_title}")
                     continue
                 
-                link = link_tag.attributes.get('href')
+                link = link_tag.get('href')
                 original_filename = link.split('/')[-1]
                 file_format = original_filename.split('.')[-1] if '.' in original_filename else 'unknown'
                 
@@ -435,11 +437,11 @@ def get_total_files(username, password, types):
     resp = requests.get(DOMAIN + course_url, auth=HttpNtlmAuth(username+"@student.guc.edu.eg", password))
     if resp.status_code != 200:
         return 0
-    html = HTMLParser(resp.text)
-    all_cards = html.css(".card-body")
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    all_cards = soup.select(".card-body")
     total_files = 0
     for card in all_cards:
-        title = card.css_first("div").text().strip().split("\n")[0]
+        title = card.find("div").get_text().strip().split("\n")[0]
         last_open = title.rfind("(")
         last_close = title.rfind(")")
         if last_open != -1 and last_close != -1 and last_close > last_open:

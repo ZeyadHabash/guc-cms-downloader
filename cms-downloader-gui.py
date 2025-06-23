@@ -1,7 +1,7 @@
 import customtkinter as ctk
 import requests
 from requests_ntlm import HttpNtlmAuth
-from selectolax.parser import HTMLParser
+from bs4 import BeautifulSoup
 from main import download_content, get_types, login, get_courses, update_course_url, get_course_info_from_formatted_name
 from main import get_total_files
 import threading
