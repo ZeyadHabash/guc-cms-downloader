@@ -11,6 +11,9 @@ A user-friendly tool to download content from the GUC CMS, featuring a graphical
 
 - **Python 3.8+** (recommended: Python 3.11)
 - **pip** (Python package manager)
+- **tkinter** (Python GUI library, required for the application window)
+
+> **Note:** `tkinter` is required for the GUI to work. See below for installation instructions if it's not already included with your Python installation.
 
 ## Installation
 
@@ -45,7 +48,7 @@ A user-friendly tool to download content from the GUC CMS, featuring a graphical
 
 ## Windows Users: Initial Setup (If you want to download VoDs)
 
-Before running the GUI (`cms-downloader-gui.py`), you **must** run the setup script to download and configure `yt-dlp` and `ffmpeg`:
+Before running the GUI (`cms-downloader-gui.py`), you **must** run the provided setup script, which will **automatically download and configure `yt-dlp` and `ffmpeg` for you**. You do **not** need to manually download these tools.
 
 1. **Run the setup script as an administrator in PowerShell**:
    - Right-click on PowerShell and select **Run as administrator**.
@@ -53,6 +56,7 @@ Before running the GUI (`cms-downloader-gui.py`), you **must** run the setup scr
    ```
    python setup_ytdlp_ffmpeg.py
    ```
+   - The script will handle downloading and setting up both `yt-dlp` and `ffmpeg` automatically. Once it finishes, you can proceed to use the GUI as normal.
 
 ## macOS and Linux Users: Initial Setup (If you want to download VoDs)
 
@@ -109,3 +113,35 @@ This will launch the application window. Follow the on-screen instructions to lo
 - If you see errors related to `customtkinter`, make sure your environment is activated and dependencies are installed.
 - **Blank window or content not rendering (macOS, sometimes other platforms):**
   - There is a known bug in the underlying GUI toolkit (tkinter/customtkinter) where sometimes the application window opens blank or does not render its content, especially on macOS. If this happens, simply move or drag the window with your mouse, or click the window's title bar. This will force the content to render and the window to become responsive. This is a platform-level issue and not a bug in this application.
+
+---
+
+## Installing tkinter
+
+### Windows
+
+- The official Python installer for Windows usually includes `tkinter` by default. If you encounter errors about missing `tkinter`, re-run the Python installer and ensure the "tcl/tk and IDLE" option is selected.
+
+### macOS
+
+- `tkinter` is typically included with Python on macOS. If you installed Python via Homebrew and `tkinter` is missing, install it with:
+  ```bash
+  brew install python-tk
+  ```
+
+### Linux (Debian/Ubuntu)
+
+- Install `tkinter` using:
+  ```bash
+  sudo apt update
+  sudo apt install python3-tk
+  ```
+
+### Linux (Fedora)
+
+- Install `tkinter` using:
+  ```bash
+  sudo dnf install python3-tkinter
+  ```
+
+After installing `tkinter`, you should be able to run the GUI as described above.
