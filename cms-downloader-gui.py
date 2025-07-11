@@ -377,6 +377,8 @@ class ModernCMSDownloader:
         self.org_mode = "type"  # Default
         self.include_week = True
         self.include_type = False
+        # Add week description toggle (default False)
+        self.week_description_toggle_var = ctk.BooleanVar(value=False)
         def set_toggle_defaults(mode):
             if mode == "type":
                 self.include_week = True
@@ -389,14 +391,17 @@ class ModernCMSDownloader:
                 self.include_type = True
             self.week_toggle_var.set(self.include_week)
             self.type_toggle_var.set(self.include_type)
+            self.week_description_toggle_var.set(False)  # Always reset to default (unchecked)
         def on_org_mode_select(choice):
             self.org_mode = self.org_mode_map[choice]
             set_toggle_defaults(self.org_mode)
             # Re-pack toggles to ensure spacing is applied after dropdown changes
             self.week_toggle.pack_forget()
             self.type_toggle.pack_forget()
+            self.week_description_toggle.pack_forget()
             self.week_toggle.pack(pady=(10, 0), anchor="w")
             self.type_toggle.pack(pady=(8, 0), anchor="w")
+            self.week_description_toggle.pack(pady=(8, 0), anchor="w")
         self.org_dropdown = ctk.CTkOptionMenu(
             master=header_frame,
             values=self.org_modes,
@@ -417,9 +422,16 @@ class ModernCMSDownloader:
             text="Include type in file name",
             variable=self.type_toggle_var
         )
+        # New: Week description toggle
+        self.week_description_toggle = ctk.CTkCheckBox(
+            master=header_frame,
+            text="Include week description in file/folder names",
+            variable=self.week_description_toggle_var
+        )
         # Show toggles by default with improved spacing
         self.week_toggle.pack(pady=(10, 0), anchor="w")
         self.type_toggle.pack(pady=(8, 0), anchor="w")
+        self.week_description_toggle.pack(pady=(8, 0), anchor="w")
         
         # Scrollable content container
         types_label = ctk.CTkLabel(
@@ -817,7 +829,13 @@ class ModernCMSDownloader:
         self.is_downloading = True
         self.current_download_thread = threading.Thread(
             target=self.download_thread,
-            args=(selected_types, self.org_mode, self.week_toggle_var.get(), self.type_toggle_var.get())
+            args=(
+                selected_types,
+                self.org_mode,
+                self.week_toggle_var.get(),
+                self.type_toggle_var.get(),
+                self.week_description_toggle_var.get()  # Pass new toggle value
+            )
         )
         self.current_download_thread.start()
     
@@ -882,7 +900,7 @@ class ModernCMSDownloader:
         popup.focus_set()
         popup.wait_window()
     
-    def download_thread(self, selected_types, org_mode, include_week, include_type):
+    def download_thread(self, selected_types, org_mode, include_week, include_type, include_week_description=False):
         """Download thread to prevent GUI freezing"""
         username, password = self.get_credentials()
         
@@ -900,7 +918,10 @@ class ModernCMSDownloader:
             return not self.is_downloading
         
         try:
-            download_content(username, password, selected_types, progress_callback, cancellation_check, self.output_folder, org_mode, include_week, include_type)
+            download_content(
+                username, password, selected_types, progress_callback, cancellation_check,
+                self.output_folder, org_mode, include_week, include_type, include_week_description
+            )
             
             # Download completed
             if self.is_downloading:

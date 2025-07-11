@@ -186,7 +186,7 @@ def get_types(username, password):
     return {'types' : all_types, 'course_name' : course_name}
         
 
-def download_content(username, password, types, progress_callback=None, cancellation_check=None, output_folder=None, org_mode='type', include_week=True, include_type=False):
+def download_content(username, password, types, progress_callback=None, cancellation_check=None, output_folder=None, org_mode='type', include_week=True, include_type=False, include_week_description=False):
     global DOMAIN, course_url, current_session_name
     if not types:
         print("No content types selected. Aborting download.")
@@ -199,12 +199,24 @@ def download_content(username, password, types, progress_callback=None, cancella
 
     soup = BeautifulSoup(resp.text, 'html.parser')
 
-    # 1. Parse weeks, reverse them to be in chronological order, and map content to a week number
+    # 1. Parse weeks, reverse them, and map content to a week number and description
     content_to_week_map = {}
+    week_to_description_map = {} # To store week descriptions
     all_weeks = soup.select(".card.mb-5.weeksdata")
-    all_weeks = list(reversed(all_weeks)) # Weeks in HTML are newest to oldest, reverse for chronological order (Week 1, 2, 3...)
+    all_weeks = list(reversed(all_weeks)) # Weeks in HTML are newest to oldest, reverse for chronological order
 
     for week_number, week_div in enumerate(all_weeks, 1):
+        # Extract week description
+        description_text = "No Description"
+        # The description <p> tag is the one not inside a div with style="display:none;"
+        all_p_tags = week_div.find_all("p", class_="m-2 p2")
+        for p_tag in all_p_tags:
+            if not p_tag.find_parent("div", style="display:none;"):
+                description_text = p_tag.text.strip()
+                break
+        week_to_description_map[week_number] = description_text
+
+        # Map content IDs to this week number
         content_items = week_div.select("div[id^=content]")
         for item in content_items:
             content_id = item.get("id")
@@ -219,7 +231,6 @@ def download_content(username, password, types, progress_callback=None, cancella
 
     for card in all_cards:
             title = card.find("div").get_text().strip().split("\n")[0]
-            # Extract content type from the last set of parentheses
             last_open = title.rfind("(")
             last_close = title.rfind(")")
             if last_open != -1 and last_close != -1 and last_close > last_open:
@@ -232,38 +243,28 @@ def download_content(username, password, types, progress_callback=None, cancella
                 total_files += 1
                 files_to_download.append(card)
 
-    # Create a mapping from file content types to selected filter names
-    # This handles cases where the file's internal type doesn't exactly match the filter name
     content_type_mapping = {}
     for card in all_cards:
         file_content_type = card.find("div").get_text().strip().split("\n")[0]
-        # Extract content type from the last set of parentheses
         last_open = file_content_type.rfind("(")
         last_close = file_content_type.rfind(")")
         if last_open != -1 and last_close != -1 and last_close > last_open:
             file_content_type = file_content_type[last_open + 1 : last_close]
-
-        # Find which selected filter this file belongs to
         for selected_type in types:
-            # Check if the file content type is contained in the selected filter name
-            # or if the selected filter name is contained in the file content type
             if (file_content_type.lower() in selected_type.lower() or
                 selected_type.lower() in file_content_type.lower() or
                 file_content_type == selected_type):
                 content_type_mapping[file_content_type] = selected_type
                 break
 
-    # Download files with progress tracking
     downloaded_files = 0
     for card in files_to_download:
         try:
-            # Check for cancellation before each download
             if cancellation_check and cancellation_check():
                 print("Download cancelled by user")
                 return all_types
 
             file_content_type = card.find("div").get_text().strip().split("\n")[0]
-            # Extract content type from the last set of parentheses
             last_open = file_content_type.rfind("(")
             last_close = file_content_type.rfind(")")
             if last_open != -1 and last_close != -1 and last_close > last_open:
@@ -271,86 +272,86 @@ def download_content(username, password, types, progress_callback=None, cancella
 
             if (file_content_type in types):
                 course_name = soup.select_one("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").get_text()
-                # Use the same parsing logic as the scraper to remove pipes and brackets
-                # Use regex to extract code and name, ignore all bracketed content at the end
                 match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
                 if match:
                     code = match.group(1).strip()
                     name = match.group(2).strip()
-                    # Format as "Course Name (CODE)" for folder naming
                     course_name = f"{name} ({code})" if code else name
                 else:
-                    # fallback: remove last bracketed number if present
                     course_name = re.sub(r"\s*\([^)]*\)\s*$", "", course_name).strip()
-                # Normalize whitespace to a single space
                 course_name = re.sub(r"\s+", " ", course_name)
 
-                # 2. Get week number and create the new prefixed title
                 content_id_div = card.select_one("div[id^=content]")
                 content_id = content_id_div.get("id") if content_id_div else None
                 week_num = content_to_week_map.get(content_id) if content_id else None
 
+                # Create the week prefix with description
+                week_prefix_for_filename = ""
+                week_prefix_for_foldername = ""
+                if week_num:
+                    week_description = week_to_description_map.get(week_num, "").strip()
+                    # Sanitize description for filesystem (removes invalid chars and control chars)
+                    sanitized_description = re.sub(r'[\\/*?:"<>|\x00-\x1f]', '', week_description) if week_description else ""
+                    
+                    week_part = f"Week {str(week_num).rstrip()}"
+                    week_prefix_for_filename = week_part # Filename inside week folder is simple
+                    
+                    if include_week_description and sanitized_description:
+                        week_prefix_for_foldername = f"{week_part} [{sanitized_description}]"
+                    else:
+                        week_prefix_for_foldername = week_part
+
                 lecture_title_raw = card.select_one("div strong").get_text()
-                # Remove the numeric prefix like "1 - " to get the base title
                 lecture_title = re.sub(r'^\d+\s*-\s*', '', lecture_title_raw).strip()
 
-                # Use output_folder as root if provided
                 root_folder = output_folder if output_folder else os.getcwd()
 
-                # Create session folder first
                 session_folder = os.path.join(root_folder, current_session_name.rstrip())
                 try:
                     os.makedirs(session_folder, exist_ok=True)
                 except OSError as error:
                     print(error)
 
-                # Create course folder inside session folder
                 course_folder_path = os.path.join(session_folder, course_name.rstrip())
                 try:
                     os.makedirs(course_folder_path, exist_ok=True)
                 except OSError as error:
                     print(error)
 
-                # Determine file path base depending on org_mode and toggles
                 if org_mode == 'type':
-                    # Use the mapped filter name for the subfolder (or fallback to file content type)
                     filter_name = content_type_mapping.get(file_content_type, file_content_type).rstrip()
                     filter_folder = os.path.join(course_folder_path, filter_name)
                     try:
                         os.makedirs(filter_folder, exist_ok=True)
                     except OSError as error:
                         print(error)
-                    # Filename prefix logic
                     name_parts = []
-                    if include_week and week_num:
-                        name_parts.append(f"Week {str(week_num).rstrip()}")
+                    if include_week and week_prefix_for_foldername:
+                        name_parts.append(week_prefix_for_foldername)
                     if include_type:
                         name_parts.append(f"({file_content_type.rstrip()})")
                     name_parts.append(lecture_title.rstrip())
                     file_name = " - ".join(name_parts).rstrip()
                     file_path_base = os.path.join(filter_folder, file_name)
                 elif org_mode == 'week':
-                    # Organize by week number
-                    week_folder = f"Week {str(week_num).rstrip()}" if week_num else "No Week"
+                    week_folder = week_prefix_for_foldername if week_prefix_for_foldername else "No Week"
                     week_folder_path = os.path.join(course_folder_path, week_folder.rstrip())
                     try:
                         os.makedirs(week_folder_path, exist_ok=True)
                     except OSError as error:
                         print(error)
-                    # Filename prefix logic
                     name_parts = []
-                    if include_week and week_num:
-                        name_parts.append(f"Week {str(week_num).rstrip()}")
+                    if include_week and week_prefix_for_filename:
+                        name_parts.append(week_prefix_for_filename)
                     if include_type:
                         name_parts.append(f"({file_content_type.rstrip()})")
                     name_parts.append(lecture_title.rstrip())
                     file_name = " - ".join(name_parts).rstrip()
                     file_path_base = os.path.join(week_folder_path, file_name)
-                else:
-                    # Flat structure
+                else: # Flat structure
                     name_parts = []
-                    if include_week and week_num:
-                        name_parts.append(f"Week {str(week_num).rstrip()}")
+                    if include_week and week_prefix_for_foldername:
+                        name_parts.append(week_prefix_for_foldername)
                     if include_type:
                         name_parts.append(f"({file_content_type.rstrip()})")
                     name_parts.append(lecture_title.rstrip())
@@ -359,7 +360,6 @@ def download_content(username, password, types, progress_callback=None, cancella
 
                 if file_content_type.lower().rstrip() == "vod":
                     file_path = file_path_base + ".mkv"
-                    # Check if file already exists, skip if so
                     if os.path.exists(file_path):
                         print(f"File already exists, skipping: {file_path}")
                         downloaded_files += 1
@@ -367,12 +367,10 @@ def download_content(username, password, types, progress_callback=None, cancella
                             progress_callback(downloaded_files, total_files, lecture_title, "VoD")
                         continue
 
-                    # Find the input with class 'vodbutton' and get its id as contentId
                     vod_input = card.select_one("input.vodbutton")
                     if vod_input is not None:
                         vod_content_id = vod_input.get('id')
                         if vod_content_id:
-                            # Call the VoD downloader
                             try:
                                 download_single_video(vod_content_id, file_path, username, password)
                             except Exception as e:
@@ -389,7 +387,6 @@ def download_content(username, password, types, progress_callback=None, cancella
                         print(f"Could not find vodbutton input for VoD file: {lecture_title}")
                         continue
                 else:
-                    # Regular file download
                     link_tag = card.find("a")
                     if not link_tag or not link_tag.get('href'):
                         print(f"Could not find download link for: {lecture_title}")
@@ -401,15 +398,13 @@ def download_content(username, password, types, progress_callback=None, cancella
                     
                     file_path = file_path_base + "." + file_format
                     
-                    # Check if file already exists, skip if so
                     if os.path.exists(file_path):
                         print(f"File already exists, skipping: {file_path}")
                         downloaded_files += 1
                         if progress_callback:
-                            progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
+                            progress_callback(downloaded_files, total_files, lecture_title, "Already Exists")
                         continue
                     print(DOMAIN + link)
-                    # Stream the file in chunks and report progress
                     try:
                         with requests.get(DOMAIN + link, auth=HttpNtlmAuth(username+"@student.guc.edu.eg", password), stream=True) as download_resp:
                             print("\nDOWNLOAD STATUS: " + str(download_resp.status_code) + "\n")
@@ -429,12 +424,11 @@ def download_content(username, password, types, progress_callback=None, cancella
                                             file_progress_str = f"{bytes_downloaded/1024/1024:.2f} MB / ? MB"
                                         if progress_callback:
                                             progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
-                            # Final callback to ensure 100% is shown
                             if progress_callback:
                                 progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
                         downloaded_files += 1
                         if progress_callback:
-                            progress_callback(downloaded_files, total_files, lecture_title)
+                            progress_callback(downloaded_files, total_files, lecture_title, "Downloaded")
                     except Exception as e:
                         print(f"Error downloading file {lecture_title}: {e}")
                         continue
@@ -442,7 +436,6 @@ def download_content(username, password, types, progress_callback=None, cancella
             print(f"Unexpected error processing file: {e}")
             continue
     return all_types
-
 
 def get_total_files(username, password, types):
     global DOMAIN, course_url
@@ -461,9 +454,3 @@ def get_total_files(username, password, types):
         if title in types:
             total_files += 1
     return total_files
-
-# login("seif.alsaid", "2002frolicGamer")
-# download_content("seif.alsaid", "2002frolicGamer", ["Lecture slides"])
-# get_courses("seif.alsaid", "2002frolicGamer")
-# update_course_url("seif.alsaid", "2002frolicGamer", "Computer System Architecture")
-# print(DOMAIN + course_url)
