@@ -39,7 +39,10 @@ A user-friendly tool to download content from the GUC CMS, featuring a graphical
      venv/bin/activate
      ```
 
-3. **Install dependencies:**
+3. **Install the required Python packages:**
+
+   > **You must install all required dependencies before running the application.**
+
    ```bash
    pip install -r requirements.txt
    ```
