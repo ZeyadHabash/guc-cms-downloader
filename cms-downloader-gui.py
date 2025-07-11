@@ -907,7 +907,7 @@ class ModernCMSDownloader:
                 self.root.after(0, self.download_completed)
         except Exception as e:
             if self.is_downloading:
-                self.root.after(0, lambda: self.download_error(str(e)))
+                self.root.after(0, lambda e=e: self.download_error(str(e)))
     
     def update_progress(self, downloaded, total, current_file, file_progress_str=None):
         """Update progress bar and labels, including per-file progress if available"""

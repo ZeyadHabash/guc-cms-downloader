@@ -256,179 +256,191 @@ def download_content(username, password, types, progress_callback=None, cancella
     # Download files with progress tracking
     downloaded_files = 0
     for card in files_to_download:
-        # Check for cancellation before each download
-        if cancellation_check and cancellation_check():
-            print("Download cancelled by user")
-            return all_types
+        try:
+            # Check for cancellation before each download
+            if cancellation_check and cancellation_check():
+                print("Download cancelled by user")
+                return all_types
 
-        file_content_type = card.find("div").get_text().strip().split("\n")[0]
-        # Extract content type from the last set of parentheses
-        last_open = file_content_type.rfind("(")
-        last_close = file_content_type.rfind(")")
-        if last_open != -1 and last_close != -1 and last_close > last_open:
-            file_content_type = file_content_type[last_open + 1 : last_close]
+            file_content_type = card.find("div").get_text().strip().split("\n")[0]
+            # Extract content type from the last set of parentheses
+            last_open = file_content_type.rfind("(")
+            last_close = file_content_type.rfind(")")
+            if last_open != -1 and last_close != -1 and last_close > last_open:
+                file_content_type = file_content_type[last_open + 1 : last_close]
 
-        if (file_content_type in types):
-            course_name = soup.select_one("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").get_text()
-            # Use the same parsing logic as the scraper to remove pipes and brackets
-            # Use regex to extract code and name, ignore all bracketed content at the end
-            match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
-            if match:
-                code = match.group(1).strip()
-                name = match.group(2).strip()
-                # Format as "Course Name (CODE)" for folder naming
-                course_name = f"{name} ({code})" if code else name
-            else:
-                # fallback: remove last bracketed number if present
-                course_name = re.sub(r"\s*\([^)]*\)\s*$", "", course_name).strip()
-            # Normalize whitespace to a single space
-            course_name = re.sub(r"\s+", " ", course_name)
+            if (file_content_type in types):
+                course_name = soup.select_one("#ContentPlaceHolderright_ContentPlaceHoldercontent_LabelCourseName").get_text()
+                # Use the same parsing logic as the scraper to remove pipes and brackets
+                # Use regex to extract code and name, ignore all bracketed content at the end
+                match = re.match(r"\(\|([A-Za-z0-9 ]+)\|\)\s*([^(]+?)(?:\s*\([^)]*\))*$", course_name)
+                if match:
+                    code = match.group(1).strip()
+                    name = match.group(2).strip()
+                    # Format as "Course Name (CODE)" for folder naming
+                    course_name = f"{name} ({code})" if code else name
+                else:
+                    # fallback: remove last bracketed number if present
+                    course_name = re.sub(r"\s*\([^)]*\)\s*$", "", course_name).strip()
+                # Normalize whitespace to a single space
+                course_name = re.sub(r"\s+", " ", course_name)
 
-            # 2. Get week number and create the new prefixed title
-            content_id_div = card.select_one("div[id^=content]")
-            content_id = content_id_div.get("id") if content_id_div else None
-            week_num = content_to_week_map.get(content_id) if content_id else None
+                # 2. Get week number and create the new prefixed title
+                content_id_div = card.select_one("div[id^=content]")
+                content_id = content_id_div.get("id") if content_id_div else None
+                week_num = content_to_week_map.get(content_id) if content_id else None
 
-            lecture_title_raw = card.select_one("div strong").get_text()
-            # Remove the numeric prefix like "1 - " to get the base title
-            lecture_title = re.sub(r'^\d+\s*-\s*', '', lecture_title_raw).strip()
+                lecture_title_raw = card.select_one("div strong").get_text()
+                # Remove the numeric prefix like "1 - " to get the base title
+                lecture_title = re.sub(r'^\d+\s*-\s*', '', lecture_title_raw).strip()
 
-            # Use output_folder as root if provided
-            root_folder = output_folder if output_folder else os.getcwd()
+                # Use output_folder as root if provided
+                root_folder = output_folder if output_folder else os.getcwd()
 
-            # Create session folder first
-            session_folder = os.path.join(root_folder, current_session_name.rstrip())
-            try:
-                os.makedirs(session_folder, exist_ok=True)
-            except OSError as error:
-                print(error)
-
-            # Create course folder inside session folder
-            course_folder_path = os.path.join(session_folder, course_name.rstrip())
-            try:
-                os.makedirs(course_folder_path, exist_ok=True)
-            except OSError as error:
-                print(error)
-
-            # Determine file path base depending on org_mode and toggles
-            if org_mode == 'type':
-                # Use the mapped filter name for the subfolder (or fallback to file content type)
-                filter_name = content_type_mapping.get(file_content_type, file_content_type).rstrip()
-                filter_folder = os.path.join(course_folder_path, filter_name)
+                # Create session folder first
+                session_folder = os.path.join(root_folder, current_session_name.rstrip())
                 try:
-                    os.makedirs(filter_folder, exist_ok=True)
+                    os.makedirs(session_folder, exist_ok=True)
                 except OSError as error:
                     print(error)
-                # Filename prefix logic
-                name_parts = []
-                if include_week and week_num:
-                    name_parts.append(f"Week {str(week_num).rstrip()}")
-                if include_type:
-                    name_parts.append(f"({file_content_type.rstrip()})")
-                name_parts.append(lecture_title.rstrip())
-                file_name = " - ".join(name_parts).rstrip()
-                file_path_base = os.path.join(filter_folder, file_name)
-            elif org_mode == 'week':
-                # Organize by week number
-                week_folder = f"Week {str(week_num).rstrip()}" if week_num else "No Week"
-                week_folder_path = os.path.join(course_folder_path, week_folder.rstrip())
+
+                # Create course folder inside session folder
+                course_folder_path = os.path.join(session_folder, course_name.rstrip())
                 try:
-                    os.makedirs(week_folder_path, exist_ok=True)
+                    os.makedirs(course_folder_path, exist_ok=True)
                 except OSError as error:
                     print(error)
-                # Filename prefix logic
-                name_parts = []
-                if include_week and week_num:
-                    name_parts.append(f"Week {str(week_num).rstrip()}")
-                if include_type:
-                    name_parts.append(f"({file_content_type.rstrip()})")
-                name_parts.append(lecture_title.rstrip())
-                file_name = " - ".join(name_parts).rstrip()
-                file_path_base = os.path.join(week_folder_path, file_name)
-            else:
-                # Flat structure
-                name_parts = []
-                if include_week and week_num:
-                    name_parts.append(f"Week {str(week_num).rstrip()}")
-                if include_type:
-                    name_parts.append(f"({file_content_type.rstrip()})")
-                name_parts.append(lecture_title.rstrip())
-                file_name = " - ".join(name_parts).rstrip()
-                file_path_base = os.path.join(course_folder_path, file_name)
 
-            if file_content_type.lower().rstrip() == "vod":
-                file_path = file_path_base + ".mkv"
-                # Check if file already exists, skip if so
-                if os.path.exists(file_path):
-                    print(f"File already exists, skipping: {file_path}")
-                    downloaded_files += 1
-                    if progress_callback:
-                        progress_callback(downloaded_files, total_files, lecture_title, "VoD")
-                    continue
+                # Determine file path base depending on org_mode and toggles
+                if org_mode == 'type':
+                    # Use the mapped filter name for the subfolder (or fallback to file content type)
+                    filter_name = content_type_mapping.get(file_content_type, file_content_type).rstrip()
+                    filter_folder = os.path.join(course_folder_path, filter_name)
+                    try:
+                        os.makedirs(filter_folder, exist_ok=True)
+                    except OSError as error:
+                        print(error)
+                    # Filename prefix logic
+                    name_parts = []
+                    if include_week and week_num:
+                        name_parts.append(f"Week {str(week_num).rstrip()}")
+                    if include_type:
+                        name_parts.append(f"({file_content_type.rstrip()})")
+                    name_parts.append(lecture_title.rstrip())
+                    file_name = " - ".join(name_parts).rstrip()
+                    file_path_base = os.path.join(filter_folder, file_name)
+                elif org_mode == 'week':
+                    # Organize by week number
+                    week_folder = f"Week {str(week_num).rstrip()}" if week_num else "No Week"
+                    week_folder_path = os.path.join(course_folder_path, week_folder.rstrip())
+                    try:
+                        os.makedirs(week_folder_path, exist_ok=True)
+                    except OSError as error:
+                        print(error)
+                    # Filename prefix logic
+                    name_parts = []
+                    if include_week and week_num:
+                        name_parts.append(f"Week {str(week_num).rstrip()}")
+                    if include_type:
+                        name_parts.append(f"({file_content_type.rstrip()})")
+                    name_parts.append(lecture_title.rstrip())
+                    file_name = " - ".join(name_parts).rstrip()
+                    file_path_base = os.path.join(week_folder_path, file_name)
+                else:
+                    # Flat structure
+                    name_parts = []
+                    if include_week and week_num:
+                        name_parts.append(f"Week {str(week_num).rstrip()}")
+                    if include_type:
+                        name_parts.append(f"({file_content_type.rstrip()})")
+                    name_parts.append(lecture_title.rstrip())
+                    file_name = " - ".join(name_parts).rstrip()
+                    file_path_base = os.path.join(course_folder_path, file_name)
 
-                # Find the input with class 'vodbutton' and get its id as contentId
-                vod_input = card.select_one("input.vodbutton")
-                if vod_input is not None:
-                    vod_content_id = vod_input.get('id')
-                    if vod_content_id:
-                        # Call the VoD downloader
-                        download_single_video(vod_content_id, file_path, username, password)
+                if file_content_type.lower().rstrip() == "vod":
+                    file_path = file_path_base + ".mkv"
+                    # Check if file already exists, skip if so
+                    if os.path.exists(file_path):
+                        print(f"File already exists, skipping: {file_path}")
                         downloaded_files += 1
                         if progress_callback:
                             progress_callback(downloaded_files, total_files, lecture_title, "VoD")
                         continue
+
+                    # Find the input with class 'vodbutton' and get its id as contentId
+                    vod_input = card.select_one("input.vodbutton")
+                    if vod_input is not None:
+                        vod_content_id = vod_input.get('id')
+                        if vod_content_id:
+                            # Call the VoD downloader
+                            try:
+                                download_single_video(vod_content_id, file_path, username, password)
+                            except Exception as e:
+                                print(f"Error downloading VoD file {lecture_title}: {e}")
+                                continue
+                            downloaded_files += 1
+                            if progress_callback:
+                                progress_callback(downloaded_files, total_files, lecture_title, "VoD")
+                            continue
+                        else:
+                            print(f"Could not find contentId for VoD file: {lecture_title}")
+                            continue
                     else:
-                        print(f"Could not find contentId for VoD file: {lecture_title}")
+                        print(f"Could not find vodbutton input for VoD file: {lecture_title}")
                         continue
                 else:
-                    print(f"Could not find vodbutton input for VoD file: {lecture_title}")
-                    continue
-            else:
-                # Regular file download
-                link_tag = card.find("a")
-                if not link_tag or not link_tag.get('href'):
-                    print(f"Could not find download link for: {lecture_title}")
-                    continue
-                
-                link = link_tag.get('href')
-                original_filename = link.split('/')[-1]
-                file_format = original_filename.split('.')[-1] if '.' in original_filename else 'unknown'
-                
-                file_path = file_path_base + "." + file_format
-                
-                # Check if file already exists, skip if so
-                if os.path.exists(file_path):
-                    print(f"File already exists, skipping: {file_path}")
-                    downloaded_files += 1
-                    if progress_callback:
-                        progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
-                    continue
-                print(DOMAIN + link)
-                # Stream the file in chunks and report progress
-                with requests.get(DOMAIN + link, auth=HttpNtlmAuth(username+"@student.guc.edu.eg", password), stream=True) as download_resp:
-                    print("\nDOWNLOAD STATUS: " + str(download_resp.status_code) + "\n")
-                    total_size = int(download_resp.headers.get('content-length', 0))
-                    bytes_downloaded = 0
-                    chunk_size = 8192
-                    file_progress_str = ""
-                    with open(file_path, "wb") as file:
-                        for chunk in download_resp.iter_content(chunk_size=chunk_size):
-                            if chunk:
-                                file.write(chunk)
-                                bytes_downloaded += len(chunk)
-                                if total_size > 0:
-                                    percent = (bytes_downloaded / total_size) * 100
-                                    file_progress_str = f"{bytes_downloaded/1024/1024:.2f} MB / {total_size/1024/1024:.2f} MB ({percent:.1f}%)"
-                                else:
-                                    file_progress_str = f"{bytes_downloaded/1024/1024:.2f} MB / ? MB"
-                                if progress_callback:
-                                    progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
-                    # Final callback to ensure 100% is shown
-                    if progress_callback:
-                        progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
-                downloaded_files += 1
-                if progress_callback:
-                    progress_callback(downloaded_files, total_files, lecture_title)
+                    # Regular file download
+                    link_tag = card.find("a")
+                    if not link_tag or not link_tag.get('href'):
+                        print(f"Could not find download link for: {lecture_title}")
+                        continue
+                    
+                    link = link_tag.get('href')
+                    original_filename = link.split('/')[-1]
+                    file_format = original_filename.split('.')[-1] if '.' in original_filename else 'unknown'
+                    
+                    file_path = file_path_base + "." + file_format
+                    
+                    # Check if file already exists, skip if so
+                    if os.path.exists(file_path):
+                        print(f"File already exists, skipping: {file_path}")
+                        downloaded_files += 1
+                        if progress_callback:
+                            progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
+                        continue
+                    print(DOMAIN + link)
+                    # Stream the file in chunks and report progress
+                    try:
+                        with requests.get(DOMAIN + link, auth=HttpNtlmAuth(username+"@student.guc.edu.eg", password), stream=True) as download_resp:
+                            print("\nDOWNLOAD STATUS: " + str(download_resp.status_code) + "\n")
+                            total_size = int(download_resp.headers.get('content-length', 0))
+                            bytes_downloaded = 0
+                            chunk_size = 8192
+                            file_progress_str = ""
+                            with open(file_path, "wb") as file:
+                                for chunk in download_resp.iter_content(chunk_size=chunk_size):
+                                    if chunk:
+                                        file.write(chunk)
+                                        bytes_downloaded += len(chunk)
+                                        if total_size > 0:
+                                            percent = (bytes_downloaded / total_size) * 100
+                                            file_progress_str = f"{bytes_downloaded/1024/1024:.2f} MB / {total_size/1024/1024:.2f} MB ({percent:.1f}%)"
+                                        else:
+                                            file_progress_str = f"{bytes_downloaded/1024/1024:.2f} MB / ? MB"
+                                        if progress_callback:
+                                            progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
+                            # Final callback to ensure 100% is shown
+                            if progress_callback:
+                                progress_callback(downloaded_files, total_files, lecture_title, file_progress_str)
+                        downloaded_files += 1
+                        if progress_callback:
+                            progress_callback(downloaded_files, total_files, lecture_title)
+                    except Exception as e:
+                        print(f"Error downloading file {lecture_title}: {e}")
+                        continue
+        except Exception as e:
+            print(f"Unexpected error processing file: {e}")
+            continue
     return all_types
 
 
