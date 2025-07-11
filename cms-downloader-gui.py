@@ -312,6 +312,10 @@ class ModernCMSDownloader:
         buttons_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
         buttons_container.pack(pady=20, padx=40, fill="x")
         
+        # Configure grid weights for button layout  
+        buttons_container.grid_columnconfigure(0, weight=1)
+        buttons_container.grid_columnconfigure(1, weight=1)
+        
         self.next_button = ctk.CTkButton(
             master=buttons_container,
             text="Continue",
@@ -321,7 +325,18 @@ class ModernCMSDownloader:
             fg_color="#2196F3",
             hover_color="#1976D2"
         )
-        self.next_button.pack(pady=(0, 15), padx=5, fill="x")
+        self.next_button.grid(row=0, column=0, padx=(5, 2.5), pady=(0, 15), sticky="ew")
+        
+        self.download_all_button = ctk.CTkButton(
+            master=buttons_container,
+            text="Download All",
+            command=self.download_all_courses,
+            height=50,
+            font=ctk.CTkFont(size=16, weight="bold"),
+            fg_color="#4CAF50",
+            hover_color="#45a049"
+        )
+        self.download_all_button.grid(row=0, column=1, padx=(2.5, 5), pady=(0, 15), sticky="ew")
         
         self.logout_button = ctk.CTkButton(
             master=buttons_container,
@@ -335,7 +350,7 @@ class ModernCMSDownloader:
             border_color="#ff6b6b",
             hover_color="#ff9999"
         )
-        self.logout_button.pack(padx=5, fill="x")
+        self.logout_button.grid(row=1, column=0, columnspan=2, padx=5, pady=(0, 0), sticky="ew")
     
     def create_download_page(self):
         """Create the download page with checkboxes and organization dropdown/toggles"""
@@ -684,6 +699,12 @@ class ModernCMSDownloader:
                     self.show_session_header_error()
                     return
                 
+                # Handle "All Courses" selection
+                if selected_course == "All Courses":
+                    # Start download all process directly
+                    self.download_all_courses()
+                    return
+                
                 username, password = self.get_credentials()
                 # Extract actual course name from formatted selection
                 actual_course_name = selected_course.strip()
@@ -700,6 +721,344 @@ class ModernCMSDownloader:
                 load_dotenv(override=True)
             self.show_page(self.page_index - 1)
     
+    def download_all_courses(self):
+        """Download from all available courses"""
+        if not self.output_folder:
+            self.show_no_output_folder_popup()
+            return
+        
+        username, password = self.get_credentials()
+        all_courses = get_courses(username, password)
+        
+        # Filter out session headers and get only actual courses
+        actual_courses = []
+        for course in all_courses:
+            if not course.startswith("---") and not course.endswith("---") and course.strip() != "--":
+                actual_courses.append(course.strip())
+        
+        if not actual_courses:
+            self.show_no_courses_popup()
+            return
+        
+        # Show confirmation dialog and get content type choice
+        content_type_choice = self.show_download_all_confirmation(actual_courses)
+        if not content_type_choice:  # User cancelled
+            return
+        
+        # Switch to loading page
+        self.show_page(3)  # Loading page
+        self.loading_spinner.start_animation()
+        
+        # Start download in separate thread
+        self.is_downloading = True
+        self.current_download_thread = threading.Thread(
+            target=self.download_all_thread,
+            args=(actual_courses, content_type_choice)
+        )
+        self.current_download_thread.start()
+    
+    def download_all_thread(self, courses, content_type_choice):
+        """Download thread for all courses"""
+        username, password = self.get_credentials()
+        total_courses = len(courses)
+        completed_courses = 0
+        
+        # Update loading title based on content type choice
+        if content_type_choice == "vods":
+            title_text = "Downloading VODs from All Courses"
+            subtitle_text = f"Processing VODs from {total_courses} courses..."
+        else:
+            title_text = "Downloading All Content from All Courses"
+            subtitle_text = f"Processing all content from {total_courses} courses..."
+        
+        self.root.after(0, lambda: self.loading_title.configure(text=title_text))
+        self.root.after(0, lambda: self.loading_subtitle.configure(text=subtitle_text))
+        
+        try:
+            for course in courses:
+                if not self.is_downloading:
+                    break
+                
+                # Update current course
+                self.root.after(0, lambda c=course: self.current_file_label.configure(text=f"Processing course: {c}"))
+                
+                # Update course URL for this course
+                update_course_url(username, password, course)
+                
+                # Get available types for this course
+                get_types_output = get_types(username, password)
+                all_types = get_types_output.get('types', [])
+                
+                if all_types:
+                    # Filter types based on user choice
+                    if content_type_choice == "vods":
+                        # Filter to only include VOD-related types
+                        vod_keywords = ["VOD", "Video", "Lecture", "Recording", "Stream"]
+                        selected_types = []
+                        for content_type in all_types:
+                            if any(keyword.lower() in content_type.lower() for keyword in vod_keywords):
+                                selected_types.append(content_type)
+                        # If no VOD types found, skip this course
+                        if not selected_types:
+                            completed_courses += 1
+                            continue
+                    else:
+                        # Use all available types
+                        selected_types = all_types
+                    
+                    # Download selected content types for this course
+                    def progress_callback(downloaded, total, current_file, file_progress_str=None):
+                        if not self.is_downloading:
+                            return
+                        # Update progress with course context
+                        course_progress = f"Course {completed_courses + 1}/{total_courses}: {course}"
+                        self.root.after(0, lambda: self.file_counter.configure(text=f"{course_progress} - {downloaded} of {total} files"))
+                        if file_progress_str == "VoD":
+                            self.root.after(0, lambda cf=current_file: self.current_file_label.configure(text=f"Downloading (VoD): {cf}"))
+                        elif file_progress_str:
+                            self.root.after(0, lambda cf=current_file, fps=file_progress_str: self.current_file_label.configure(text=f"Downloading: {cf} ({fps})"))
+                        else:
+                            self.root.after(0, lambda cf=current_file: self.current_file_label.configure(text=f"Downloading: {cf}"))
+                    
+                    def cancellation_check():
+                        return not self.is_downloading
+                    
+                    download_content(
+                        username, password, selected_types, progress_callback, cancellation_check,
+                        self.output_folder, "type", True, False, False  # Default organization settings
+                    )
+                
+                completed_courses += 1
+                
+                # Update overall progress
+                overall_progress = completed_courses / total_courses
+                self.root.after(0, lambda p=overall_progress: self.progress_bar.set(p))
+                self.root.after(0, lambda p=overall_progress: self.progress_text.configure(text=f"{int(p * 100)}% of courses complete"))
+            
+            # Download completed
+            if self.is_downloading:
+                self.root.after(0, self.download_all_completed)
+        except Exception as e:
+            if self.is_downloading:
+                self.root.after(0, lambda e=e: self.download_error(str(e)))
+    
+    def download_all_completed(self):
+        """Handle completion of downloading all courses"""
+        # Stop the spinner animation
+        self.loading_spinner.stop_animation()
+        
+        self.progress_bar.set(1.0)
+        self.progress_text.configure(text="100% Complete")
+        self.current_file_label.configure(text="All courses downloaded successfully!")
+        
+        # Show completion message and return to courses page
+        self.root.after(3000, lambda: self.show_page(1))
+    
+    def show_download_all_confirmation(self, courses):
+        """Show confirmation dialog for downloading all courses"""
+        # Create popup window
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("Download All Courses")
+        popup.geometry("520x500")
+        popup.resizable(False, False)
+        
+        # Center the popup on the main window
+        popup.transient(self.root)
+        popup.grab_set()  # Make popup modal
+        
+        # Center the popup
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth() // 2) - (520 // 2)
+        y = (popup.winfo_screenheight() // 2) - (500 // 2)
+        popup.geometry(f'520x500+{x}+{y}')
+        
+        # Main scrollable container
+        main_container = ctk.CTkScrollableFrame(master=popup, corner_radius=15)
+        main_container.pack(pady=20, padx=20, fill="both", expand=True)
+        
+        # Icon and title
+        icon_label = ctk.CTkLabel(
+            master=main_container,
+            text="📚",
+            font=ctk.CTkFont(size=32)
+        )
+        icon_label.pack(pady=(20, 10))
+        
+        title_label = ctk.CTkLabel(
+            master=main_container,
+            text="Download All Courses",
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        title_label.pack(pady=(0, 10))
+        
+        message_label = ctk.CTkLabel(
+            master=main_container,
+            text=f"You are about to download content from {len(courses)} courses.\nThis may take a long time. Continue?",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        message_label.pack(pady=(0, 15))
+        
+        # Content type selection
+        content_type_label = ctk.CTkLabel(
+            master=main_container,
+            text="What content would you like to download?",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            anchor="w"
+        )
+        content_type_label.pack(pady=(0, 10), anchor="w")
+        
+        # Radio button variable
+        content_type_var = ctk.StringVar(value="all")
+        
+        # All content radio button
+        all_content_radio = ctk.CTkRadioButton(
+            master=main_container,
+            text="All content types (lectures, assignments, quizzes, etc.)",
+            variable=content_type_var,
+            value="all",
+            font=ctk.CTkFont(size=12)
+        )
+        all_content_radio.pack(pady=(0, 8), anchor="w")
+        
+        # VODs only radio button
+        vods_only_radio = ctk.CTkRadioButton(
+            master=main_container,
+            text="VODs (Video on Demand) only",
+            variable=content_type_var,
+            value="vods",
+            font=ctk.CTkFont(size=12)
+        )
+        vods_only_radio.pack(pady=(0, 15), anchor="w")
+        
+        # Scrollable list of courses
+        courses_label = ctk.CTkLabel(
+            master=main_container,
+            text="Courses to download:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            anchor="w"
+        )
+        courses_label.pack(pady=(0, 5), anchor="w")
+        
+        courses_frame = ctk.CTkScrollableFrame(master=main_container, height=150)
+        courses_frame.pack(pady=(0, 20), padx=10, fill="x")
+        
+        for course in courses:
+            course_label = ctk.CTkLabel(
+                master=courses_frame,
+                text=f"• {course}",
+                font=ctk.CTkFont(size=11),
+                anchor="w"
+            )
+            course_label.pack(pady=2, anchor="w")
+        
+        # Button container
+        button_container = ctk.CTkFrame(master=main_container, fg_color="transparent")
+        button_container.pack(pady=(0, 20), fill="x")
+        
+        # Configure grid weights for button layout
+        button_container.grid_columnconfigure(0, weight=1)
+        button_container.grid_columnconfigure(1, weight=1)
+        
+        result = [None]  # Use list to store result from closure
+        
+        def on_confirm():
+            result[0] = content_type_var.get()
+            popup.destroy()
+        
+        def on_cancel():
+            result[0] = None
+            popup.destroy()
+        
+        confirm_button = ctk.CTkButton(
+            master=button_container,
+            text="Download All",
+            command=on_confirm,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#4CAF50",
+            hover_color="#45a049"
+        )
+        confirm_button.grid(row=0, column=0, padx=(5, 2.5), pady=5, sticky="ew")
+        
+        cancel_button = ctk.CTkButton(
+            master=button_container,
+            text="Cancel",
+            command=on_cancel,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#9E9E9E",
+            hover_color="#757575"
+        )
+        cancel_button.grid(row=0, column=1, padx=(2.5, 5), pady=5, sticky="ew")
+        
+        # Focus on the popup and make it modal
+        popup.focus_set()
+        popup.wait_window()
+        
+        return result[0]
+    
+    def show_no_courses_popup(self):
+        """Show popup when no courses are available"""
+        # Create popup window
+        popup = ctk.CTkToplevel(self.root)
+        popup.title("No Courses Available")
+        popup.geometry("400x200")
+        popup.resizable(False, False)
+        
+        # Center the popup on the main window
+        popup.transient(self.root)
+        popup.grab_set()  # Make popup modal
+        
+        # Center the popup
+        popup.update_idletasks()
+        x = (popup.winfo_screenwidth() // 2) - (400 // 2)
+        y = (popup.winfo_screenheight() // 2) - (200 // 2)
+        popup.geometry(f'400x200+{x}+{y}')
+        
+        # Main container
+        main_container = ctk.CTkFrame(master=popup, corner_radius=15)
+        main_container.pack(pady=20, padx=20, fill="both", expand=True)
+        
+        # Icon and title
+        icon_label = ctk.CTkLabel(
+            master=main_container,
+            text="ℹ️",
+            font=ctk.CTkFont(size=32)
+        )
+        icon_label.pack(pady=(20, 10))
+        
+        title_label = ctk.CTkLabel(
+            master=main_container,
+            text="No Courses Available",
+            font=ctk.CTkFont(size=18, weight="bold")
+        )
+        title_label.pack(pady=(0, 10))
+        
+        message_label = ctk.CTkLabel(
+            master=main_container,
+            text="No courses are available for download.",
+            font=ctk.CTkFont(size=14),
+            text_color="gray"
+        )
+        message_label.pack(pady=(0, 20))
+        
+        # OK button
+        ok_button = ctk.CTkButton(
+            master=main_container,
+            text="OK",
+            command=popup.destroy,
+            height=40,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            fg_color="#2196F3",
+            hover_color="#1976D2"
+        )
+        ok_button.pack(pady=(0, 20), padx=20, fill="x")
+        
+        # Focus on the popup and make it modal
+        popup.focus_set()
+        popup.wait_window()
+
     def get_credentials(self):
         """Get saved credentials"""
         return [os.getenv("USERNAME", ""), os.getenv("PASSWORD", "")]
@@ -707,7 +1066,10 @@ class ModernCMSDownloader:
     def update_courses(self, username, password):
         """Update course list"""
         all_courses = get_courses(username, password)
-        self.course_select.configure(values=all_courses)
+        
+        # Add "All Courses" option at the beginning
+        course_options = ["All Courses"] + all_courses
+        self.course_select.configure(values=course_options)
         
         # Set initial selection to first actual course (not session header)
         initial_selection = "--"
@@ -993,6 +1355,9 @@ class ModernCMSDownloader:
         if selection.startswith("---") and selection.endswith("---"):
             # Disable the continue button for session headers
             self.next_button.configure(state="disabled")
+        elif selection == "All Courses":
+            # Enable the continue button for "All Courses" option
+            self.next_button.configure(state="normal")
         else:
             # Enable the continue button for actual courses
             self.next_button.configure(state="normal")
